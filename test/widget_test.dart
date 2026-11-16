@@ -14,4 +14,15 @@ void main() {
     expect(find.text('Перевод игры'), findsOneWidget);
     expect(find.text('Читы (соло)'), findsOneWidget);
   });
+
+  testWidgets('Save editor tab opens without widget build errors', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(const GameLabApp());
+    await tester.tap(find.text('Редактор сохранений'));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 }
