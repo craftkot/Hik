@@ -61,7 +61,7 @@ class BinarySaveEditor {
     int maxResults = 100,
   }) {
     if (maxResults < 1 || maxResults > 10000) {
-      throw const RangeError('Лимит совпадений вне диапазона');
+      throw RangeError('Лимит совпадений вне диапазона');
     }
     final needle = encode(value, format);
     final matches = <SaveNumberHit>[];
