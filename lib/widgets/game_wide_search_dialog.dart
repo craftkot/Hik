@@ -12,11 +12,13 @@ class GameWideSearchDialog extends StatefulWidget {
     required this.storage,
     required this.files,
     required this.folderCount,
+    this.initialQuery,
   });
 
   final GameStorage storage;
   final List<GameFile> files;
   final int folderCount;
+  final String? initialQuery;
 
   @override
   State<GameWideSearchDialog> createState() => _GameWideSearchDialogState();
@@ -30,6 +32,18 @@ class _GameWideSearchDialogState extends State<GameWideSearchDialog> {
   bool _busy = false;
   bool _cancel = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initialQuery?.trim() ?? '';
+    if (initial.isNotEmpty) {
+      _query.text = initial;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search();
+      });
+    }
+  }
 
   @override
   void dispose() {
