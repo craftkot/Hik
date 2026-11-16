@@ -1,0 +1,194 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'binary_save_editor.dart';
+import 'game_file.dart';
+import 'storage_service.dart';
+
+/// Searches accessible files selected by the user, never other processes or
+/// private Android application directories.
+class GameValueHit {
+  const GameValueHit({
+    required this.file,
+    required this.offset,
+    required this.format,
+    required this.preview,
+    this.numericFormat,
+    this.isText = false,
+  });
+
+  final GameFile file;
+  /// Byte offset for binary data; character index for UTF-8 text.
+  final int offset;
+  final String format;
+  final String preview;
+  final SaveNumberFormat? numericFormat;
+  final bool isText;
+
+  String get location =>
+      isText ? 'символ $offset' : '0x${offset.toRadixString(16)}';
+}
+
+class GameSearchSummary {
+  const GameSearchSummary({
+    required this.hits,
+    required this.scanned,
+    required this.skipped,
+    required this.readErrors,
+    required this.cancelled,
+    required this.truncated,
+  });
+
+  final List<GameValueHit> hits;
+  final int scanned;
+  final int skipped;
+  final int readErrors;
+  final bool cancelled;
+  final bool truncated;
+}
+
+class GameValueSearch {
+  const GameValueSearch._();
+
+  /// Skip executable/media/archive payloads by default. Include unknown
+  /// extensions, save blobs, JSON, ini, sqlite, XML, and extensionless files.
+  /// Limits below prevent huge asset bundles from exhausting mobile memory.
+  static bool isCandidate(GameFile file) {
+    if (file.name.toLowerCase().contains('.ehtid-backup-')) return false;
+    if (file.size < 1 || file.size > maxEditableBytes) return false;
+    return !const <String>{
+      '.exe', '.dll', '.so', '.dylib', '.pdb', '.class', '.dex',
+      '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg',
+      '.mp3', '.ogg', '.wav', '.flac', '.mp4', '.mkv', '.webm',
+      '.zip', '.apk', '.jar', '.obb', '.pak', '.xapk', '.mrpack',
+      '.bundle', '.unity3d', '.assets', '.pdf', '.7z', '.rar',
+    }.contains(file.extension);
+  }
+
+  /// Bounded scan; callers may cancel and inspect progress between files.
+  /// Returns a snapshot of results; it never writes any game file.
+  static Future<GameSearchSummary> search({
+    required GameStorage storage,
+    required Iterable<GameFile> files,
+    required String query,
+    bool Function()? shouldCancel,
+    void Function(int done, int total)? onProgress,
+    int maxFiles = 4000,
+    int maxResults = 200,
+    int maxPerFile = 12,
+  }) async {
+    final value = query.trim();
+    if (value.isEmpty || value.length > 128) {
+      throw const FormatException('Введи число или текст (до 128 символов)');
+    }
+    if (maxFiles < 1 || maxResults < 1 || maxPerFile < 1) {
+      throw RangeError('Лимиты поиска должны быть положительными');
+    }
+    final candidates = <GameFile>[];
+    final unique = <String>{};
+    var skipped = 0;
+    for (final file in files) {
+      if (candidates.length >= maxFiles) {
+        skipped++;
+        continue;
+      }
+      if (!unique.add(file.id)) continue;
+      if (isCandidate(file)) {
+        candidates.add(file);
+      } else {
+        skipped++;
+      }
+    }
+
+    // Pre-encode once. Decimal queries also check IEEE-754 Float32; invalid
+    // integer ranges are skipped rather than failing the whole search.
+    final needles = <SaveNumberFormat, Uint8List>{};
+    for (final format in SaveNumberFormat.values) {
+      try {
+        needles[format] = BinarySaveEditor.encode(value, format);
+      } on FormatException {
+        // A text query or number outside this representation.
+      }
+    }
+
+    final hits = <GameValueHit>[];
+    var scanned = 0;
+    var errors = 0;
+    var cancelled = false;
+    var truncated = false;
+    onProgress?.call(0, candidates.length);
+    for (final file in candidates) {
+      if (shouldCancel?.call() == true) {
+        cancelled = true;
+        break;
+      }
+      try {
+        final bytes = await storage.read(file);
+        final text = decodeEditableText(bytes);
+        if (text != null) {
+          final lowered = text.toLowerCase();
+          final term = value.toLowerCase();
+          var start = 0;
+          while (hits.length < maxResults &&
+              hits.where((hit) => hit.file.id == file.id).length < maxPerFile) {
+            final offset = lowered.indexOf(term, start);
+            if (offset < 0) break;
+            start = offset + 1;
+            if (!_matchesBoundary(text, offset, term.length, value)) continue;
+            final previewStart = offset < 28 ? 0 : offset - 28;
+            final previewEnd = offset + value.length + 28 > text.length
+                ? text.length
+                : offset + value.length + 28;
+            final preview = text.substring(previewStart, previewEnd)
+                .replaceAll(RegExp(r'[\r\n\t]+'), ' ');
+            hits.add(GameValueHit(file: file, offset: offset,
+              format: 'UTF-8', preview: preview, isText: true));
+          }
+        } else {
+          var inFile = 0;
+          for (final entry in needles.entries) {
+            if (hits.length >= maxResults || inFile >= maxPerFile) break;
+            final needle = entry.value;
+            for (var at = 0; at <= bytes.length - needle.length; at++) {
+              var equal = true;
+              for (var i = 0; i < needle.length; i++) {
+                if (bytes[at + i] != needle[i]) { equal = false; break; }
+              }
+              if (!equal) continue;
+              hits.add(GameValueHit(file: file, offset: at,
+                format: entry.key.label, preview: 'Точное числовое совпадение',
+                numericFormat: entry.key));
+              inFile++;
+              if (hits.length >= maxResults || inFile >= maxPerFile) break;
+            }
+          }
+        }
+      } catch (_) {
+        errors++; // Ignore inaccessible files, not the rest of the scan.
+      }
+      scanned++;
+      onProgress?.call(scanned, candidates.length);
+      if (hits.length >= maxResults) {
+        truncated = true;
+        break;
+      }
+      // Allow Flutter to handle cancel/progress gestures during larger scans.
+      await Future<void>.delayed(Duration.zero);
+    }
+    return GameSearchSummary(hits: List.unmodifiable(hits),
+      scanned: scanned, skipped: skipped, readErrors: errors,
+      cancelled: cancelled, truncated: truncated);
+  }
+
+  static bool _matchesBoundary(
+      String text, int offset, int length, String query) {
+    if (!RegExp(r'^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$')
+        .hasMatch(query)) return true;
+    bool partOfNumber(String s) =>
+        RegExp(r'[0-9a-zA-Z_.+-]').hasMatch(s);
+    if (offset > 0 && partOfNumber(text[offset - 1])) return false;
+    if (offset + length < text.length &&
+        partOfNumber(text[offset + length])) return false;
+    return true;
+  }
+}
