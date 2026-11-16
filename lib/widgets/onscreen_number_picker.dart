@@ -120,9 +120,9 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
       double displayHeight) {
     if (_image == null) return;
     final x = (tap.localPosition.dx / displayWidth * _imageWidth)
-        .clamp(0.0, _imageWidth.toDouble());
+        .clamp(0.0, _imageWidth.toDouble()).toDouble();
     final y = (tap.localPosition.dy / displayHeight * _imageHeight)
-        .clamp(0.0, _imageHeight.toDouble());
+        .clamp(0.0, _imageHeight.toDouble()).toDouble();
     final found = ScreenNumberOcr.atPoint(_tokens, x, y);
     setState(() {
       _pickedX = x;
