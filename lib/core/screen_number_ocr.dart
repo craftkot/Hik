@@ -87,6 +87,8 @@ class ScreenNumberOcr {
     double y, {
     double maxDistance = 30,
   }) {
+    if (!x.isFinite || !y.isFinite || !maxDistance.isFinite ||
+        maxDistance < 0) return null;
     ScreenNumberToken? closest;
     var best = maxDistance * maxDistance;
     for (final token in tokens) {
