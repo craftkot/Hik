@@ -390,7 +390,7 @@ class _GameLabHomeState extends State<GameLabHome> {
                   'число 120, строка "текст", true или false.',
                 style: TextStyle(fontSize: 11, color: _muted))),
           ]))),
-      ));
+      );
   }
 
   Future<bool> _editJsonField(JsonField field) async {
