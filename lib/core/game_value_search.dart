@@ -13,6 +13,7 @@ class GameValueHit {
     required this.offset,
     required this.format,
     required this.preview,
+    required this.matchedValue,
     this.numericFormat,
     this.isText = false,
   });
@@ -22,6 +23,7 @@ class GameValueHit {
   final int offset;
   final String format;
   final String preview;
+  final String matchedValue;
   final SaveNumberFormat? numericFormat;
   final bool isText;
 
@@ -142,7 +144,8 @@ class GameValueSearch {
             final preview = text.substring(previewStart, previewEnd)
                 .replaceAll(RegExp(r'[\r\n\t]+'), ' ');
             hits.add(GameValueHit(file: file, offset: offset,
-              format: 'UTF-8', preview: preview, isText: true));
+              format: 'UTF-8', preview: preview, matchedValue: value,
+              isText: true));
             inFile++;
           }
         } else {
@@ -158,7 +161,7 @@ class GameValueSearch {
               if (!equal) continue;
               hits.add(GameValueHit(file: file, offset: at,
                 format: entry.key.label, preview: 'Точное числовое совпадение',
-                numericFormat: entry.key));
+                matchedValue: value, numericFormat: entry.key));
               inFile++;
               if (hits.length >= maxResults || inFile >= maxPerFile) break;
             }
