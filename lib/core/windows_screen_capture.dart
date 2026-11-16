@@ -42,7 +42,7 @@ try {
     try {
       final result = await Process.run(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', script],
+        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
       ).timeout(const Duration(seconds: 25));
       if (result.exitCode != 0 || !await temp.exists()) {
         throw StateError('Не удалось сделать снимок: ${result.stderr}');
