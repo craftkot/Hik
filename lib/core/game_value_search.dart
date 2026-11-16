@@ -129,8 +129,8 @@ class GameValueSearch {
           final lowered = text.toLowerCase();
           final term = value.toLowerCase();
           var start = 0;
-          while (hits.length < maxResults &&
-              hits.where((hit) => hit.file.id == file.id).length < maxPerFile) {
+          var inFile = 0;
+          while (hits.length < maxResults && inFile < maxPerFile) {
             final offset = lowered.indexOf(term, start);
             if (offset < 0) break;
             start = offset + 1;
@@ -143,6 +143,7 @@ class GameValueSearch {
                 .replaceAll(RegExp(r'[\r\n\t]+'), ' ');
             hits.add(GameValueHit(file: file, offset: offset,
               format: 'UTF-8', preview: preview, isText: true));
+            inFile++;
           }
         } else {
           var inFile = 0;
