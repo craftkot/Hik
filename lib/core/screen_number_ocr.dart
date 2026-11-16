@@ -62,7 +62,8 @@ class ScreenNumberOcr {
       final top = int.tryParse(parts[indices['top']!]);
       final width = int.tryParse(parts[indices['width']!]);
       final height = int.tryParse(parts[indices['height']!]);
-      if (conf == null || conf < 30 || left == null || top == null ||
+      if (conf == null || !conf.isFinite || conf < 30 || conf > 100 ||
+          left == null || top == null || left < 0 || top < 0 ||
           width == null || height == null || width < 1 || height < 1) {
         continue;
       }
