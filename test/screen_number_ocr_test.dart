@@ -41,6 +41,20 @@ void main() {
     expect(ScreenNumberOcr.atPoint(const [], 10, 10), isNull);
   });
 
+  test('rejects non-finite confidence, out-of-range scores and negative positions', () {
+    const header = 'left\ttop\twidth\theight\tconf\ttext';
+    final tokens = ScreenNumberOcr.parseTsv(
+      '$header\n'
+      '0\t0\t20\t10\tNaN\t123\n'
+      '0\t0\t20\t10\tInfinity\t124\n'
+      '0\t0\t20\t10\t101\t125\n'
+      '-1\t0\t20\t10\t90\t126\n'
+      '0\t-1\t20\t10\t90\t127\n'
+      '0\t0\t20\t10\t90\t128\n',
+    );
+    expect(tokens.map((token) => token.value), ['128']);
+  });
+
   test('confidence breaks ties, and distance bound excludes far labels', () {
     const two = [
       ScreenNumberToken(value: '25', raw: '25', left: 50,
