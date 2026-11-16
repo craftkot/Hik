@@ -81,10 +81,12 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
       _tokens = const [];
     });
     try {
-      final decoded = await ui.decodeImageFromList(bytes);
-      final width = decoded.width;
-      final height = decoded.height;
-      decoded.dispose();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final width = frame.image.width;
+      final height = frame.image.height;
+      frame.image.dispose();
+      codec.dispose();
       if (width < 1 || height < 1 || width > 12000 || height > 12000) {
         throw StateError('Неподдерживаемое разрешение снимка');
       }
