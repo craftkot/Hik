@@ -89,8 +89,12 @@ class ScreenNumberOcr {
   }) {
     if (!x.isFinite || !y.isFinite || !maxDistance.isFinite ||
         maxDistance < 0) return null;
+    // Squaring an enormous but finite radius can overflow to Infinity,
+    // accidentally accepting arbitrarily distant OCR tokens.
+    final radiusSquared = maxDistance * maxDistance;
+    if (!radiusSquared.isFinite) return null;
     ScreenNumberToken? closest;
-    var best = maxDistance * maxDistance;
+    var best = radiusSquared;
     var ambiguous = false;
     for (final token in tokens) {
       final distance = token.distanceSquaredTo(x, y);
