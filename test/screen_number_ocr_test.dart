@@ -98,6 +98,9 @@ void main() {
       maxDistance: double.nan), isNull);
     expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
       maxDistance: double.infinity), isNull);
+    // A finite radius may still overflow when squared.
+    expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
+      maxDistance: 1e200), isNull);
     expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
       maxDistance: -1), isNull);
     expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
