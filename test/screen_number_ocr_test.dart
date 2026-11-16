@@ -67,4 +67,18 @@ void main() {
     expect(ScreenNumberOcr.atPoint(two, 500, 500,
       maxDistance: 1000)?.value, '35');
   });
+  test('invalid tap coordinates or search radius never select a number', () {
+    final tokens = ScreenNumberOcr.parseTsv(_tsv);
+    expect(ScreenNumberOcr.atPoint(tokens, double.nan, 60), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 120, double.infinity), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
+      maxDistance: double.nan), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
+      maxDistance: double.infinity), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
+      maxDistance: -1), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
+      maxDistance: 0)?.value, '125');
+  });
+
 }
