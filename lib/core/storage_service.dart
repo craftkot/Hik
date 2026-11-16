@@ -124,13 +124,42 @@ class DesktopGameStorage implements GameStorage {
     if (!await original.exists()) throw StateError('Исходный файл исчез');
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final backup = '${file.id}.ehtid-backup-$stamp.bak';
+    // Never truncate the live save: prepare and verify the replacement first.
+    final temporary = File('${file.id}.ehtid-pending-$stamp.tmp');
+    final displaced = File('${file.id}.ehtid-rollback-$stamp.tmp');
     await original.copy(backup); // Abort without touching original on failure.
-    await original.writeAsBytes(data, flush: true);
-    final check = await original.readAsBytes();
-    if (!_sameBytes(check, data)) {
-      throw StateError('Проверка записи не прошла. Копия: $backup');
+    var movedOriginal = false;
+    try {
+      await temporary.writeAsBytes(data, flush: true);
+      if (!_sameBytes(await temporary.readAsBytes(), data)) {
+        throw StateError('Проверка временного файла не прошла');
+      }
+      // Moving the original aside also works on Windows, where rename cannot
+      // reliably replace an existing destination. Keep it until verification.
+      await original.rename(displaced.path);
+      movedOriginal = true;
+      await temporary.rename(original.path);
+      if (!_sameBytes(await original.readAsBytes(), data)) {
+        throw StateError('Проверка записи не прошла');
+      }
+      await displaced.delete();
+      return backup;
+    } catch (error) {
+      if (movedOriginal) {
+        // Restore the exact original, not the newly written bytes.
+        try {
+          if (await original.exists()) await original.delete();
+          await displaced.rename(original.path);
+        } catch (rollbackError) {
+          throw StateError('Запись не удалась: $error. '
+              'Автовосстановление не удалось: $rollbackError. '
+              'Исходник сохранён в $displaced, резервная копия: $backup');
+        }
+      }
+      rethrow;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
     }
-    return backup;
   }
 
   bool _sameBytes(Uint8List a, Uint8List b) {
