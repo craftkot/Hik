@@ -117,7 +117,8 @@ class _GameWideSearchDialogState extends State<GameWideSearchDialog> {
             if (_busy || result != null) ...[
               const SizedBox(height: 10),
               LinearProgressIndicator(
-                value: _total > 0 ? _done / _total : null),
+                value: _total > 0 ? _done / _total
+                    : result != null ? 1 : null),
               const SizedBox(height: 5),
               Text(result == null
                   ? 'Проверено: $_done / $_total'
