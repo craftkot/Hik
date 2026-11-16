@@ -88,11 +88,11 @@ class GameValueSearch {
     final unique = <String>{};
     var skipped = 0;
     for (final file in files) {
+      if (!unique.add(file.id)) continue;
       if (candidates.length >= maxFiles) {
         skipped++;
         continue;
       }
-      if (!unique.add(file.id)) continue;
       if (isCandidate(file)) {
         candidates.add(file);
       } else {
