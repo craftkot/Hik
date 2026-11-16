@@ -107,4 +107,24 @@ void main() {
       maxDistance: 0)?.value, '125');
   });
 
+  test('externally supplied invalid OCR candidates cannot be tapped', () {
+    const invalid = [
+      ScreenNumberToken(value: '999', raw: '999', left: -1,
+        top: 0, width: 20, height: 20, confidence: 95),
+      ScreenNumberToken(value: '998', raw: '998', left: 0,
+        top: 0, width: 0, height: 20, confidence: 95),
+      ScreenNumberToken(value: '997', raw: '997', left: 0,
+        top: 0, width: 20, height: 20, confidence: double.nan),
+      ScreenNumberToken(value: '996', raw: '996', left: 0,
+        top: 0, width: 20, height: 20, confidence: 101),
+      ScreenNumberToken(value: '995', raw: '995', left: 0,
+        top: 0, width: 20, height: 20, confidence: 29),
+    ];
+    expect(ScreenNumberOcr.atPoint(invalid, 5, 5), isNull);
+    const valid = ScreenNumberToken(value: '125', raw: '125',
+      left: 0, top: 0, width: 20, height: 20, confidence: 90);
+    expect(ScreenNumberOcr.atPoint([...invalid, valid], 5, 5)?.value,
+      '125');
+  });
+
 }
