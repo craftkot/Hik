@@ -55,18 +55,41 @@ void main() {
     expect(tokens.map((token) => token.value), ['128']);
   });
 
-  test('confidence breaks ties, and distance bound excludes far labels', () {
+  test('conflicting equidistant OCR readings require manual confirmation', () {
     const two = [
       ScreenNumberToken(value: '25', raw: '25', left: 50,
         top: 50, width: 25, height: 20, confidence: 50),
       ScreenNumberToken(value: '35', raw: '35', left: 50,
         top: 50, width: 25, height: 20, confidence: 90),
     ];
-    expect(ScreenNumberOcr.atPoint(two, 60, 60)?.value, '35');
+    expect(ScreenNumberOcr.atPoint(two, 60, 60), isNull);
     expect(ScreenNumberOcr.atPoint(two, 500, 500), isNull);
     expect(ScreenNumberOcr.atPoint(two, 500, 500,
-      maxDistance: 1000)?.value, '35');
+      maxDistance: 1000), isNull);
   });
+  test('identical overlapping readings remain selectable', () {
+    const same = [
+      ScreenNumberToken(value: '25', raw: '25', left: 50,
+        top: 50, width: 25, height: 20, confidence: 50),
+      ScreenNumberToken(value: '25', raw: '25', left: 50,
+        top: 50, width: 25, height: 20, confidence: 90),
+    ];
+    expect(ScreenNumberOcr.atPoint(same, 60, 60)?.value, '25');
+  });
+
+  test('closer unambiguous reading wins over distant conflicting labels', () {
+    const tokens = [
+      ScreenNumberToken(value: '25', raw: '25', left: 50,
+        top: 50, width: 25, height: 20, confidence: 50),
+      ScreenNumberToken(value: '35', raw: '35', left: 50,
+        top: 50, width: 25, height: 20, confidence: 90),
+      ScreenNumberToken(value: '45', raw: '45', left: 100,
+        top: 100, width: 10, height: 10, confidence: 80),
+    ];
+    expect(ScreenNumberOcr.atPoint(tokens, 65, 65), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 105, 105)?.value, '45');
+  });
+
   test('invalid tap coordinates or search radius never select a number', () {
     final tokens = ScreenNumberOcr.parseTsv(_tsv);
     expect(ScreenNumberOcr.atPoint(tokens, double.nan, 60), isNull);
