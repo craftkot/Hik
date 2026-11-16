@@ -5,11 +5,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'core/archive_inspector.dart';
+import 'core/binary_save_editor.dart';
 import 'core/game_file.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/storage_service.dart';
 import 'core/translation_service.dart';
+import 'widgets/binary_save_dialog.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -264,6 +266,81 @@ class _GameLabHomeState extends State<GameLabHome> {
       if (a[i] != b[i]) return false;
     }
     return true;
+  }
+
+
+  Future<void> _showBinarySaveEditor() async {
+    final file = _selected;
+    final original = _bytes;
+    if (_loading || file == null || original == null ||
+        file.size > maxEditableBytes) return;
+    final request = await showDialog<NumericPatchRequest>(
+      context: context,
+      builder: (_) => BinarySaveDialog(data: original),
+    );
+    if (!mounted || request == null) return;
+    await _applyBinaryPatch(file, original, request);
+  }
+
+  Future<void> _applyBinaryPatch(GameFile file, Uint8List original,
+      NumericPatchRequest request) async {
+    Uint8List patched;
+    try {
+      if (_selected?.id != file.id || !identical(_bytes, original)) {
+        throw StateError('Открытый файл изменился: повтори поиск');
+      }
+      patched = BinarySaveEditor.patch(original,
+        offset: request.offset,
+        expected: request.expected,
+        replacement: request.replacement,
+        format: request.format,
+      );
+      if (_bytesEqual(original, patched)) {
+        _message('Новое значение совпадает со старым — записывать нечего');
+        return;
+      }
+    } catch (error) {
+      _message('Не удалось подготовить правку: $error');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить бинарный сейв?'),
+        content: Text('Файл: ${file.relativePath}\n'
+          'Смещение: 0x${request.offset.toRadixString(16)}\n'
+          '${request.format.label}: ${request.expected} → ${request.replacement}\n\n'
+          'Сначала создадим резервную копию. '
+          'Если игра использует контрольную сумму или шифрование, '
+          'отредактированный сейв может не загрузиться. Закрой игру.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Создать копию и применить')),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    setState(() => _loading = true);
+    try {
+      final onDisk = await _storage.read(file);
+      if (!_bytesEqual(onDisk, original)) {
+        throw StateError('Сейв на диске изменился. Открой его заново.');
+      }
+      final backup = await _storage.writeWithBackup(file, patched);
+      final verify = await _storage.read(file);
+      if (!_bytesEqual(verify, patched)) {
+        throw StateError('Проверка записи не прошла. Бэкап: $backup');
+      }
+      if (!mounted) return;
+      setState(() { _bytes = patched; _state = 'Бинарный сейв обновлён'; });
+      _message('Записано и проверено. Бэкап: $backup');
+    } catch (error) {
+      _message('Не удалось применить правку: $error');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _showJsonFields() async {
@@ -590,6 +667,8 @@ class _GameLabHomeState extends State<GameLabHome> {
           'Выбери файл', 'Два раза нажимать не обязательно — одного касания хватит.'));
     final imagePreview = _archive == null && file.isImage && file.size <= maxEditableBytes;
     final canEdit = _originalText != null && !file.isImage;
+    final canBinaryEdit = _section == Workspace.saves && !canEdit &&
+        _archive == null && !file.isImage && file.size <= maxEditableBytes;
     final canUseJsonEditor = canEdit &&
         (_section == Workspace.saves || _section == Workspace.localize) &&
         (file.isJson || _editor.text.trimLeft().startsWith('{') ||
@@ -614,6 +693,10 @@ class _GameLabHomeState extends State<GameLabHome> {
               tooltip: 'Редактировать поля JSON',
               onPressed: _showJsonFields,
               icon: const Icon(Icons.account_tree_outlined, color: _accent)),
+            if (canBinaryEdit) IconButton(
+              tooltip: 'Поиск чисел в бинарном сейве',
+              onPressed: _loading ? null : _showBinarySaveEditor,
+              icon: const Icon(Icons.manage_search, color: _accent)),
             if (_dirty) IconButton(
               tooltip: 'Отменить несохранённые правки',
               onPressed: () => _editor.text = _originalText ?? '',
@@ -650,9 +733,17 @@ class _GameLabHomeState extends State<GameLabHome> {
                 : SingleChildScrollView(padding: const EdgeInsets.all(20),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('HEX-ПРОСМОТР · только чтение',
+                        const Text('HEX-ПРОСМОТР',
                             style: TextStyle(color: _accent,
                                 fontWeight: FontWeight.w700, fontSize: 12)),
+                        if (canBinaryEdit) Padding(
+                          padding: const EdgeInsets.only(top: 12, bottom: 8),
+                          child: FilledButton.icon(
+                            onPressed: _loading ? null : _showBinarySaveEditor,
+                            icon: const Icon(Icons.manage_search),
+                            label: const Text('Найти и изменить число в сейве'),
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         const Text('Формат не распознан как обычный UTF-8. '
                             'Шифрование и упаковка зависят от конкретной игры.',
@@ -665,7 +756,9 @@ class _GameLabHomeState extends State<GameLabHome> {
             child: Align(alignment: Alignment.centerLeft,
               child: Text(canEdit
                   ? 'Редактирование локально · резервная копия при применении'
-                  : 'Просмотр без изменений исходного файла',
+                  : canBinaryEdit
+                    ? 'Числовые поля: поиск, выбор смещения, бэкап перед записью'
+                    : 'Просмотр без изменений исходного файла',
                   style: const TextStyle(fontSize: 11, color: _muted)))),
       ]),
     );
@@ -747,7 +840,7 @@ class _GameLabHomeState extends State<GameLabHome> {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.2.0', style: TextStyle(fontSize: 11, color: _muted)),
+      const Text('v0.3.1', style: TextStyle(fontSize: 11, color: _muted)),
     ]),
   );
 
