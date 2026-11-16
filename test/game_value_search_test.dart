@@ -109,7 +109,9 @@ void main() {
     expect(limited.hits, hasLength(1));
     expect(limited.truncated, true);
     expect(limited.skipped, 1);
-    expect(() => GameValueSearch.search(
-        storage: storage, files: files, query: ''), throwsFormatException);
+    await expectLater(
+      GameValueSearch.search(storage: storage, files: files, query: ''),
+      throwsFormatException,
+    );
   });
 }
