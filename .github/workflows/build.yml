@@ -82,9 +82,24 @@ jobs:
           $exe = Join-Path $release 'game_lab.exe'
           if (!(Test-Path $exe -PathType Leaf)) { throw "Missing Windows executable: $exe" }
           if ((Get-Item $exe).Length -eq 0) { throw "Empty Windows executable" }
-          if (!(Test-Path (Join-Path $release 'data') -PathType Container)) { throw "Missing Flutter data directory" }
+          foreach ($required in @('flutter_windows.dll', 'data/icudtl.dat', 'data/flutter_assets')) {
+            if (!(Test-Path (Join-Path $release $required))) { throw "Missing Windows runtime component: $required" }
+          }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path "$release/*" -DestinationPath 'dist/EHTID-GameLab-Windows-portable.zip' -Force
+          Add-Type -AssemblyName System.IO.Compression
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'dist/EHTID-GameLab-Windows-portable.zip'))
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\\', '/') })
+            foreach ($required in @('game_lab.exe', 'flutter_windows.dll', 'data/icudtl.dat')) {
+              if ($entries -notcontains $required) { throw "Portable ZIP missing required entry: $required" }
+            }
+            if (!(@($entries | Where-Object { $_ -like 'data/flutter_assets/*' }).Count -gt 0)) {
+              throw 'Portable ZIP missing Flutter assets'
+            }
+          } finally {
+            $zip.Dispose()
+          }
           Get-FileHash 'dist/EHTID-GameLab-Windows-portable.zip' -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  EHTID-GameLab-Windows-portable.zip" } |
             Set-Content 'dist/SHA256SUMS.txt'
