@@ -91,15 +91,21 @@ class ScreenNumberOcr {
         maxDistance < 0) return null;
     ScreenNumberToken? closest;
     var best = maxDistance * maxDistance;
+    var ambiguous = false;
     for (final token in tokens) {
       final distance = token.distanceSquaredTo(x, y);
-      if (distance > best) continue;
-      if (closest == null || distance < best ||
-          (distance == best && token.confidence > closest.confidence)) {
+      if (!distance.isFinite || distance > best) continue;
+      if (closest == null || distance < best) {
         closest = token;
         best = distance;
+        ambiguous = false;
+      } else if (distance == best) {
+        // Two equally close, conflicting OCR readings are not a safe
+        // automatic choice, even if one reports higher confidence.
+        if (token.value != closest.value) ambiguous = true;
+        if (token.confidence > closest.confidence) closest = token;
       }
     }
-    return closest;
+    return ambiguous ? null : closest;
   }
 }
