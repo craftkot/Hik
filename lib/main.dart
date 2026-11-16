@@ -11,6 +11,7 @@ import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/storage_service.dart';
 import 'core/translation_service.dart';
+import 'core/windows_save_discovery.dart';
 import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
 
@@ -172,6 +173,70 @@ class _GameLabHomeState extends State<GameLabHome> {
     } catch (error) {
       _message('Не удалось добавить папку: $error');
     }
+  }
+
+
+  Future<void> _findWindowsSaveFolders() async {
+    final source = _folder;
+    if (!Platform.isWindows || source == null || _loading) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    if (_extraFolders.length >= 5) {
+      _message('Уже выбрано максимальное количество папок');
+      return;
+    }
+    setState(() => _loading = true);
+    List<String> matches;
+    try {
+      matches = await WindowsSaveDiscovery.discoverForGame(source);
+    } catch (error) {
+      _message('Не удалось найти папки сохранений: $error');
+      return;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    if (!mounted) return;
+    final additions = matches
+        .where((f) => f != source && !_extraFolders.contains(f))
+        .take(5 - _extraFolders.length)
+        .toList();
+    if (additions.isEmpty) {
+      _message('Папок с названием игры в стандартных местах не найдено. '
+          'Добавь папку вручную.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Найденные папки сохранений Windows'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Найдены каталоги, совпадающие с названием игры. '
+                'Подключить их к поиску? Другие приложения не сканируются.'),
+              const SizedBox(height: 10),
+              for (final path in additions) Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: SelectableText(path, style: const TextStyle(
+                  fontFamily: 'monospace', fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Добавить к поиску')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _extraFolders.addAll(additions));
+    await _scan();
   }
 
   Future<void> _showGameWideSearch() async {
@@ -669,10 +734,15 @@ class _GameLabHomeState extends State<GameLabHome> {
           child: Text(_folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
       if (_folder != null && (_section == Workspace.saves ||
-          _section == Workspace.cheats))
+          _section == Workspace.cheats)) ...[
+        if (Platform.isWindows)
+          IconButton(onPressed: _loading ? null : _findWindowsSaveFolders,
+            tooltip: 'Найти папки сохранений Windows по названию игры',
+            icon: const Icon(Icons.travel_explore_outlined)),
         IconButton(onPressed: _loading ? null : _addFolder,
           tooltip: 'Добавить папку с сейвами (Windows / Android)',
           icon: const Icon(Icons.create_new_folder_outlined)),
+      ],
       IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
       const SizedBox(width: 6),
