@@ -12,6 +12,7 @@ import 'core/json_editor.dart';
 import 'core/storage_service.dart';
 import 'core/translation_service.dart';
 import 'widgets/binary_save_dialog.dart';
+import 'widgets/game_wide_search_dialog.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -86,6 +87,7 @@ class _GameLabHomeState extends State<GameLabHome> {
 
   Workspace _section = Workspace.preloads;
   String? _folder;
+  final List<String> _extraFolders = [];
   List<GameFile> _files = [];
   GameFile? _selected;
   Uint8List? _bytes;
@@ -138,11 +140,62 @@ class _GameLabHomeState extends State<GameLabHome> {
         return;
       }
       if (!mounted) return;
-      setState(() { _folder = folder; _selected = null; _bytes = null;
+      setState(() { _folder = folder; _extraFolders.clear();
+        _selected = null; _bytes = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
       await _scan();
     } catch (error) { _message('Не удалось открыть папку: $error'); }
+  }
+
+
+  Future<void> _addFolder() async {
+    if (_folder == null || _loading) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    if (_extraFolders.length >= 5) {
+      _message('Для одного поиска можно выбрать до 6 папок');
+      return;
+    }
+    try {
+      final folder = await _storage.chooseFolder();
+      if (folder == null) return;
+      if (folder == _folder || _extraFolders.contains(folder)) {
+        _message('Эта папка уже добавлена');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _extraFolders.add(folder));
+      await _scan();
+    } catch (error) {
+      _message('Не удалось добавить папку: $error');
+    }
+  }
+
+  Future<void> _showGameWideSearch() async {
+    if (_folder == null || _loading) {
+      _message('Сначала выбери папку игры');
+      return;
+    }
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    final file = await showDialog<GameFile>(
+      context: context,
+      builder: (_) => GameWideSearchDialog(
+        storage: _storage,
+        files: List<GameFile>.of(_files),
+        folderCount: 1 + _extraFolders.length,
+      ),
+    );
+    if (!mounted || file == null) return;
+    if (_section == Workspace.cheats) {
+      setState(() => _section = Workspace.saves);
+    }
+    await _openFile(file);
   }
 
   Future<void> _scan() async {
@@ -150,14 +203,40 @@ class _GameLabHomeState extends State<GameLabHome> {
     if (folder == null || _loading) return;
     setState(() { _loading = true; _state = 'Сканирование файлов…'; });
     try {
-      final found = await _storage.scan(folder);
+      final roots = [folder, ..._extraFolders];
+      final found = <GameFile>[];
+      final ids = <String>{};
+      final errors = <String>[];
+      for (var i = 0; i < roots.length; i++) {
+        try {
+          final batch = await _storage.scan(roots[i]);
+          for (final item in batch) {
+            if (!ids.add(item.id)) continue;
+            found.add(GameFile(
+              id: item.id, name: item.name, size: item.size,
+              relativePath: roots.length == 1
+                  ? item.relativePath
+                  : 'Папка ${i + 1}/${item.relativePath}',
+            ));
+          }
+        } catch (error) {
+          errors.add('Папка ${i + 1}: $error');
+        }
+      }
+      if (errors.length == roots.length) {
+        throw StateError('Ни одна папка не прочитана: ${errors.join('; ')}');
+      }
       found.sort((a, b) => a.relativePath.toLowerCase()
           .compareTo(b.relativePath.toLowerCase()));
       if (!mounted) return;
-      setState(() { _files = found; _profile = detectGameProfile(found); _selected = null; _bytes = null;
-        _originalText = null; _mobilePreview = false;
+      setState(() { _files = found; _profile = detectGameProfile(found);
+        _selected = null; _bytes = null; _originalText = null;
+        _mobilePreview = false;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
-        _state = 'Найдено ${found.length} файлов · движок: ${_profile?.engine ?? 'неизвестен'}'; });
+        _state = 'Найдено ${found.length} файлов из ${roots.length} папок'
+          ' · движок: ${_profile?.engine ?? 'неизвестен'}'
+          '${errors.isNotEmpty ? ' · ошибок папок: ${errors.length}' : ''}';
+      });
     } catch (error) { _message('Ошибка сканирования: $error'); }
     finally { if (mounted) setState(() => _loading = false); }
   }
@@ -589,6 +668,11 @@ class _GameLabHomeState extends State<GameLabHome> {
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
           child: Text(_folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
+      if (_folder != null && (_section == Workspace.saves ||
+          _section == Workspace.cheats))
+        IconButton(onPressed: _loading ? null : _addFolder,
+          tooltip: 'Добавить папку с сейвами (Windows / Android)',
+          icon: const Icon(Icons.create_new_folder_outlined)),
       IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
       const SizedBox(width: 6),
@@ -621,6 +705,12 @@ class _GameLabHomeState extends State<GameLabHome> {
                   fontWeight: FontWeight.w800, letterSpacing: 1.3, fontSize: 12)),
               const Spacer(),
               Text('${items.length}', style: const TextStyle(color: _accent)),
+              if (_section == Workspace.saves)
+                IconButton(
+                  tooltip: 'Искать значение во всех выбранных папках',
+                  onPressed: _loading || _folder == null ? null : _showGameWideSearch,
+                  icon: const Icon(Icons.manage_search, color: _accent),
+                ),
             ]),
             const SizedBox(height: 13),
             TextField(controller: _query,
@@ -816,6 +906,12 @@ class _GameLabHomeState extends State<GameLabHome> {
               'Защиту сетевых игр и античит обходить не будем.',
           style: const TextStyle(color: _muted, height: 1.5)),
         const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: _loading || _folder == null ? null : _showGameWideSearch,
+          icon: const Icon(Icons.search),
+          label: const Text('Найти число или текст в файлах игры'),
+        ),
+        const SizedBox(height: 8),
         FilledButton.icon(onPressed: _loading || !Platform.isWindows ? null : _listProcesses,
             icon: const Icon(Icons.manage_search),
             label: const Text('Найти запущенные процессы (Windows)')),
@@ -840,7 +936,7 @@ class _GameLabHomeState extends State<GameLabHome> {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.3.1', style: TextStyle(fontSize: 11, color: _muted)),
+      const Text('v0.3.2', style: TextStyle(fontSize: 11, color: _muted)),
     ]),
   );
 
