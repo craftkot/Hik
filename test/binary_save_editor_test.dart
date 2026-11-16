@@ -31,9 +31,9 @@ void main() {
   test('Int32 BE and negative signed values', () {
     final bytes = Uint8List.fromList([0xfe, 0xff, 0xff, 0xff, 0xf9]);
     expect(BinarySaveEditor.search(
-        bytes, '-7', SaveNumberFormat.int32Big), isEmpty);
+        bytes, '-7', SaveNumberFormat.int32Big).single.offset, 1);
     expect(BinarySaveEditor.search(
-        bytes, '-7', SaveNumberFormat.int32Little).single.offset, 1);
+        bytes, '-7', SaveNumberFormat.int32Little), isEmpty);
     expect(BinarySaveEditor.encode(
         '-7', SaveNumberFormat.int32Big), [0xff, 0xff, 0xff, 0xf9]);
   });
