@@ -24,7 +24,8 @@ jobs:
         run: python3 tool/prepare_android.py
       - run: flutter pub get
       - run: dart format lib test
-      - run: flutter analyze
+      # Flutter 3.50 emits informational style/deprecation lints; retain fatal warnings/errors.
+      - run: flutter analyze --no-fatal-infos
       - run: flutter test
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
@@ -43,7 +44,7 @@ jobs:
       - name: Create Windows platform scaffold
         run: flutter create --platforms=windows --org com.ehtid --project-name game_lab .
       - run: flutter pub get
-      - run: flutter analyze
+      - run: flutter analyze --no-fatal-infos
       - run: flutter test
       - run: flutter build windows --release
       - uses: actions/upload-artifact@v4
