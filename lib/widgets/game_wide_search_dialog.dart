@@ -170,7 +170,7 @@ class _GameWideSearchDialogState extends State<GameWideSearchDialog> {
                       isThreeLine: true,
                       trailing: const Icon(Icons.open_in_new, size: 18),
                       onTap: _busy ? null :
-                        () => Navigator.of(context).pop(hit.file),
+                        () => Navigator.of(context).pop(hit),
                     );
                   },
                 )),
