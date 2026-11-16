@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -28,7 +29,7 @@ class WindowsScreenCapture {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 \$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
-\$bmp = New-Object System.Drawing.Bitmap(\$bounds.Width, \$bounds.Height)
+\$bmp = [System.Drawing.Bitmap]::new(\$bounds.Width, \$bounds.Height)
 \$graphics = [System.Drawing.Graphics]::FromImage(\$bmp)
 try {
   \$graphics.CopyFromScreen(\$bounds.Left, \$bounds.Top, 0, 0, \$bmp.Size)
@@ -80,6 +81,8 @@ class LocalScreenOcr {
       if (result.exitCode != 0) return null;
       return result.stdout.toString();
     } on ProcessException {
+      return null;
+    } on TimeoutException {
       return null;
     } finally {
       try {
