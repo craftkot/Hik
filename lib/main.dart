@@ -313,7 +313,7 @@ class _GameLabHomeState extends State<GameLabHome> {
                   'число 120, строка "текст", true или false.',
                 style: TextStyle(fontSize: 11, color: _muted))),
           ]))),
-      ));
+      );
   }
 
   Future<bool> _editJsonField(JsonField field) async {
@@ -635,7 +635,7 @@ class _GameLabHomeState extends State<GameLabHome> {
             ? Center(child: InteractiveViewer(
                 minScale: 0.5, maxScale: 5,
                 child: Image.memory(bytes, fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Text('Не удалось декодировать картинку'))))
+                  errorBuilder: (context, error, stackTrace) => const Text('Не удалось декодировать картинку'))))
             : canEdit
                 ? Padding(padding: const EdgeInsets.all(12),
                     child: TextField(controller: _editor,
@@ -785,7 +785,7 @@ class _GameLabHomeState extends State<GameLabHome> {
                 maxLines: 2, style: const TextStyle(fontSize: 11, color: _accent))),
             Expanded(child: _isImageBytes(preview)
               ? InteractiveViewer(child: Image.memory(preview,
-                  errorBuilder: (_, _, _) => const Center(
+                  errorBuilder: (context, error, stackTrace) => const Center(
                     child: Text('Неизвестный формат изображения'))))
               : SingleChildScrollView(padding: const EdgeInsets.all(12),
                 child: SelectableText(decodeEditableText(preview) ??
