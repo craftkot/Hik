@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'core/archive_inspector.dart';
 import 'core/binary_save_editor.dart';
 import 'core/game_file.dart';
+import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/storage_service.dart';
@@ -14,6 +15,7 @@ import 'core/translation_service.dart';
 import 'core/windows_save_discovery.dart';
 import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
+import 'widgets/onscreen_number_picker.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -36,7 +38,7 @@ extension WorkspaceInfo on Workspace {
     Workspace.preloads => 'Просмотр ресурсов и распознанных файлов',
     Workspace.saves => 'Редактирование доступных текстовых сейвов',
     Workspace.localize => 'Локализация без изменения ключей JSON',
-    Workspace.cheats => 'Память запущенной игры: модуль в разработке',
+    Workspace.cheats => 'Выбор чисел на экране и поиск в сейвах; live-память позже',
   };
   IconData get icon => switch (this) {
     Workspace.preloads => Icons.folder_zip_outlined,
@@ -239,7 +241,24 @@ class _GameLabHomeState extends State<GameLabHome> {
     await _scan();
   }
 
-  Future<void> _showGameWideSearch() async {
+  Future<void> _chooseOnScreenNumber() async {
+    if (_folder == null) {
+      _message('Выбери папку игры: найденное число нужно будет искать в файлах');
+      return;
+    }
+    if (_dirty || _loading) {
+      _message('Сначала закончи текущую правку');
+      return;
+    }
+    final number = await showDialog<String>(
+      context: context,
+      builder: (_) => const OnScreenNumberPicker(),
+    );
+    if (!mounted || number == null) return;
+    await _showGameWideSearch(initialQuery: number);
+  }
+
+  Future<void> _showGameWideSearch({String? initialQuery}) async {
     if (_folder == null || _loading) {
       _message('Сначала выбери папку игры');
       return;
@@ -248,19 +267,81 @@ class _GameLabHomeState extends State<GameLabHome> {
       _message('Сначала сохрани или отмени правки');
       return;
     }
-    final file = await showDialog<GameFile>(
+    final hit = await showDialog<GameValueHit>(
       context: context,
       builder: (_) => GameWideSearchDialog(
         storage: _storage,
         files: List<GameFile>.of(_files),
         folderCount: 1 + _extraFolders.length,
+        initialQuery: initialQuery,
       ),
     );
-    if (!mounted || file == null) return;
+    if (!mounted || hit == null) return;
     if (_section == Workspace.cheats) {
       setState(() => _section = Workspace.saves);
     }
-    await _openFile(file);
+    await _openFile(hit.file);
+    if (!mounted || _selected?.id != hit.file.id) return;
+    if (hit.numericFormat != null && _bytes != null &&
+        _originalText == null && !_loading) {
+      await _editFoundBinaryNumber(hit);
+    }
+  }
+
+  Future<void> _editFoundBinaryNumber(GameValueHit hit) async {
+    final source = _bytes;
+    final format = hit.numericFormat;
+    if (source == null || format == null || _dirty) return;
+    final controller = TextEditingController(text: hit.matchedValue);
+    String? replacement;
+    try {
+      replacement = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Изменить найденное число?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(hit.file.relativePath,
+                style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 10),
+              Text('${hit.format} · ${hit.location} · '
+                'значение ${hit.matchedValue}'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true, decimal: true),
+                decoration: const InputDecoration(labelText: 'Новое число'),
+              ),
+              const SizedBox(height: 12),
+              const Text('Проверь, что это нужное поле HP/маны/валюты, '
+                  'а не случайное совпадение.',
+                style: TextStyle(fontSize: 12)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Отмена')),
+            FilledButton(onPressed: () =>
+                Navigator.pop(dialogContext, controller.text),
+              child: const Text('Проверить изменение')),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted || replacement == null) return;
+    await _applyBinaryPatch(hit.file, source,
+      NumericPatchRequest(
+        offset: hit.offset,
+        format: format,
+        expected: hit.matchedValue,
+        replacement: replacement,
+      ),
+    );
   }
 
   Future<void> _scan() async {
@@ -976,8 +1057,16 @@ class _GameLabHomeState extends State<GameLabHome> {
               'Защиту сетевых игр и античит обходить не будем.',
           style: const TextStyle(color: _muted, height: 1.5)),
         const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _loading || _folder == null
+              ? null : _chooseOnScreenNumber,
+          icon: const Icon(Icons.touch_app_outlined),
+          label: const Text('Нажать на число на экране'),
+        ),
+        const SizedBox(height: 10),
         OutlinedButton.icon(
-          onPressed: _loading || _folder == null ? null : _showGameWideSearch,
+          onPressed: _loading || _folder == null
+              ? null : () => _showGameWideSearch(),
           icon: const Icon(Icons.search),
           label: const Text('Найти число или текст в файлах игры'),
         ),
@@ -1006,7 +1095,7 @@ class _GameLabHomeState extends State<GameLabHome> {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.3.2', style: TextStyle(fontSize: 11, color: _muted)),
+      const Text('v0.3.3', style: TextStyle(fontSize: 11, color: _muted)),
     ]),
   );
 
