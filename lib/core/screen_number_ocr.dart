@@ -97,6 +97,12 @@ class ScreenNumberOcr {
     var best = radiusSquared;
     var ambiguous = false;
     for (final token in tokens) {
+      // Public callers may supply tokens without passing through parseTsv.
+      // Never trust malformed geometry or confidence as a clickable value.
+      if (token.left < 0 || token.top < 0 ||
+          token.width <= 0 || token.height <= 0 ||
+          !token.confidence.isFinite || token.confidence < 30 ||
+          token.confidence > 100) continue;
       final distance = token.distanceSquaredTo(x, y);
       if (!distance.isFinite || distance > best) continue;
       if (closest == null || distance < best) {
