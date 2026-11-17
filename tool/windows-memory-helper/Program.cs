@@ -16,7 +16,7 @@ internal sealed class Request
     public string Replacement { get; set; } = "";
     public string Address { get; set; } = "";
     public string[] Addresses { get; set; } = Array.Empty<string>();
-    public int MaxBytes { get; set; } = 536870912; // 512 MiB, explicit bounded scan
+    public long MaxBytes { get; set; } = 536870912; // 512 MiB, explicit bounded scan
     public int MaxResults { get; set; } = 3000;
     public int Alignment { get; set; } = 4;
 }
@@ -200,9 +200,12 @@ internal static class Program
         return new { ok = true, addresses = matches, invalidated = errors, truncated = false };
     }
 
-    private static object Write(Request request)
+    private static object Write(Request request) => WriteInternal(request, allowSelf: false);
+
+    private static object WriteInternal(Request request, bool allowSelf)
     {
-        EnsurePid(request.Pid);
+        if (allowSelf && request.Pid == Environment.ProcessId) { /* self-test only */ }
+        else EnsurePid(request.Pid);
         var expected = Encode(request.Format, request.Expected);
         var replacement = Encode(request.Format, request.Replacement);
         var address = ParseAddress(request.Address);
@@ -249,16 +252,16 @@ internal static class Program
             var initial = ReadSelf(address, 4);
             if (!initial.AsSpan().SequenceEqual(Encode("i32", "270544960")))
                 throw new InvalidOperationException("Initial read/encoding test failed");
-            var write = Write(new Request {
+            WriteInternal(new Request {
                 Pid = Environment.ProcessId, Address = "0x" + address.ToInt64().ToString("X"),
                 Format = "i32", Expected = "270544960", Replacement = "7331"
-            });
+            }, allowSelf: true);
             if (Marshal.ReadInt32(address) != 7331)
                 throw new InvalidOperationException("Write/readback selftest failed");
-            Write(new Request {
+            WriteInternal(new Request {
                 Pid = Environment.ProcessId, Address = "0x" + address.ToInt64().ToString("X"),
                 Format = "i32", Expected = "7331", Replacement = "270544960"
-            });
+            }, allowSelf: true);
             if (Marshal.ReadInt32(address) != 0x10203040)
                 throw new InvalidOperationException("Restore selftest failed");
             return new { ok = true, selfTest = "read, guarded write, readback, restore" };
