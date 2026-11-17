@@ -16,13 +16,15 @@ import 'core/windows_save_discovery.dart';
 import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
 import 'widgets/onscreen_number_picker.dart';
+import 'widgets/live_memory_panel.dart';
 
 void main() => runApp(const GameLabApp());
 
-const _background = Color(0xFF0C0B13);
+const _background = Color(0xFF0A0A12);
 const _panel = Color(0xFF181625);
 const _panelLight = Color(0xFF222035);
-const _accent = Color(0xFFAA83FF);
+const _accent = Color(0xFFB68BFF);
+const _cyanAccent = Color(0xFF5EE9F5);
 const _muted = Color(0xFFAAA5BE);
 
 enum Workspace { preloads, saves, localize, cheats }
@@ -38,7 +40,7 @@ extension WorkspaceInfo on Workspace {
     Workspace.preloads => 'Просмотр ресурсов и распознанных файлов',
     Workspace.saves => 'Редактирование доступных текстовых сейвов',
     Workspace.localize => 'Локализация без изменения ключей JSON',
-    Workspace.cheats => 'Выбор чисел на экране и поиск в сейвах; live-память позже',
+    Workspace.cheats => 'Windows RAM · поиск и изменение значений в офлайн-играх',
   };
   IconData get icon => switch (this) {
     Workspace.preloads => Icons.folder_zip_outlined,
@@ -104,7 +106,6 @@ class _GameLabHomeState extends State<GameLabHome> {
   bool _mobilePreview = false;
   String _language = 'ru';
   String _state = 'Выбери папку игры, чтобы начать';
-  List<String> _runningProcesses = [];
   GameProfile? _profile;
 
   @override
@@ -701,29 +702,6 @@ class _GameLabHomeState extends State<GameLabHome> {
     finally { if (mounted) setState(() => _loading = false); }
   }
 
-  Future<void> _listProcesses() async {
-    if (!Platform.isWindows) {
-      _message('На Android память других игр из обычного APK недоступна');
-      return;
-    }
-    setState(() => _loading = true);
-    try {
-      final result = await Process.run('tasklist', ['/fo', 'csv', '/nh']);
-      if (result.exitCode != 0) throw StateError(result.stderr.toString());
-      final processes = <String>[];
-      for (final line in result.stdout.toString().split(RegExp(r'\r?\n'))) {
-        final matches = RegExp(r'"([^"]*)"').allMatches(line).toList();
-        if (matches.length >= 2) {
-          processes.add('${matches[0].group(1)}  ·  PID ${matches[1].group(1)}');
-        }
-      }
-      if (!mounted) return;
-      setState(() { _runningProcesses = processes.take(150).toList();
-        _state = 'Найдено ${processes.length} процессов (только просмотр)'; });
-    } catch (error) { _message('Не удалось получить процессы: $error'); }
-    finally { if (mounted) setState(() => _loading = false); }
-  }
-
   void _changeSection(Workspace value) {
     if (value == _section) return;
     if (_dirty) {
@@ -764,14 +742,24 @@ class _GameLabHomeState extends State<GameLabHome> {
       Padding(padding: EdgeInsets.symmetric(
           horizontal: compact ? 13 : 18, vertical: 25),
         child: Row(children: [
-          const Icon(Icons.hexagon_outlined, size: 32, color: _accent),
+          Container(
+            width: 38, height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(11),
+              boxShadow: [BoxShadow(
+                color: _accent.withValues(alpha: .22), blurRadius: 20)]),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(11),
+              child: Image.asset('assets/brand/logo.png',
+                width: 38, height: 38, fit: BoxFit.cover)),
+          ),
           if (!compact) const SizedBox(width: 10),
           if (!compact) const Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [Text('EHTID', style: TextStyle(
               fontSize: 19, fontWeight: FontWeight.w900, letterSpacing: 2)),
-              Text('GAME LAB', style: TextStyle(fontSize: 10,
-                  letterSpacing: 2, color: _muted))],
+              Text('GAME LAB  ·  ALPHA', style: TextStyle(fontSize: 9,
+                  letterSpacing: 1.2, color: _cyanAccent))],
           )),
         ])),
       const Divider(height: 1, color: Color(0xFF2D293C)),
@@ -1060,51 +1048,83 @@ class _GameLabHomeState extends State<GameLabHome> {
     ]),
   );
 
-  Widget _cheatsView() => Container(
-    width: double.infinity,
-    decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(17)),
-    child: Padding(padding: const EdgeInsets.all(24),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Row(children: [Icon(Icons.memory, size: 30, color: _accent),
-          SizedBox(width: 12),
-          Expanded(child: Text('Live Editor · офлайн-игры',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)))]),
-        const SizedBox(height: 18),
-        Text(Platform.isAndroid
-            ? 'Обычный Android APK не получает доступ к памяти другого приложения. '
-              'Без root, специальной отладочной сборки или интеграции с самой игрой '
-              'изменение значений в реальном времени недоступно.'
-            : 'Первый этап: определение запущенных процессов. '
-              'Сканирование и изменение памяти пока не реализованы. '
-              'Защиту сетевых игр и античит обходить не будем.',
-          style: const TextStyle(color: _muted, height: 1.5)),
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: _loading || _folder == null
-              ? null : _chooseOnScreenNumber,
-          icon: const Icon(Icons.touch_app_outlined),
-          label: const Text('Нажать на число на экране'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: _loading || _folder == null
-              ? null : () => _showGameWideSearch(),
-          icon: const Icon(Icons.search),
-          label: const Text('Найти число или текст в файлах игры'),
-        ),
-        const SizedBox(height: 8),
-        FilledButton.icon(onPressed: _loading || !Platform.isWindows ? null : _listProcesses,
-            icon: const Icon(Icons.manage_search),
-            label: const Text('Найти запущенные процессы (Windows)')),
-        const SizedBox(height: 14),
-        if (_runningProcesses.isNotEmpty) Expanded(child: ListView.builder(
-          itemCount: _runningProcesses.length,
-          itemBuilder: (_, i) => ListTile(dense: true,
-            leading: const Icon(Icons.desktop_windows_outlined, color: _muted),
-            title: Text(_runningProcesses[i], style: const TextStyle(fontSize: 12))))),
+  Widget _cheatsView() => ListView(children: [
+    Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF35204D), Color(0xFF19172F), Color(0xFF11303C)],
+          begin: Alignment.topLeft, end: Alignment.bottomRight),
+        border: Border.all(color: _accent.withValues(alpha: .24)),
+      ),
+      child: Row(children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.asset('assets/brand/logo.png',
+            width: 78, height: 78, fit: BoxFit.cover)),
+        const SizedBox(width: 20),
+        const Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('EHTID · OFFLINE LAB',
+              style: TextStyle(color: _cyanAccent, letterSpacing: 1.6,
+                fontSize: 11, fontWeight: FontWeight.w800)),
+            SizedBox(height: 6),
+            Text('Редактор игры',
+              style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
+            SizedBox(height: 7),
+            Text('HP · Мана · Валюта · Локальные сейвы',
+              style: TextStyle(color: Color(0xFFD1C9E6), fontSize: 12)),
+          ],
+        )),
       ]),
     ),
-  );
+    const SizedBox(height: 16),
+    if (Platform.isWindows) const LiveMemoryPanel()
+    else Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: _panel,
+        borderRadius: BorderRadius.circular(16)),
+      child: const Text('На Android чтение памяти другого приложения '
+        'недоступно обычному APK. Работай с разрешёнными файлами сохранений.',
+        style: TextStyle(color: _muted))),
+    const SizedBox(height: 16),
+    Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(color: _panel,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF342B4E))),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [
+          Icon(Icons.save_outlined, color: _cyanAccent),
+          SizedBox(width: 10),
+          Expanded(child: Text('Редактирование сохранений',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+        ]),
+        const SizedBox(height: 9),
+        const Text('Найди число по снимку экрана или во всех выбранных '
+          'файлах игры. Перед записью будет создана резервная копия.',
+          style: TextStyle(color: _muted, fontSize: 12, height: 1.5)),
+        const SizedBox(height: 13),
+        Wrap(spacing: 9, runSpacing: 9, children: [
+          FilledButton.tonalIcon(
+            onPressed: _loading || _folder == null
+                ? null : _chooseOnScreenNumber,
+            icon: const Icon(Icons.touch_app_outlined),
+            label: const Text('Число на скриншоте')),
+          OutlinedButton.icon(
+            onPressed: _loading || _folder == null
+                ? null : () => _showGameWideSearch(),
+            icon: const Icon(Icons.search),
+            label: const Text('Поиск в файлах игры')),
+        ]),
+        if (_folder == null) const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text('Сначала выбери папку игры в верхней панели.',
+            style: TextStyle(color: _muted, fontSize: 11))),
+      ]),
+    ),
+  ]);
 
   Widget _statusBar() => Container(
     width: double.infinity,
@@ -1117,7 +1137,7 @@ class _GameLabHomeState extends State<GameLabHome> {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.3.3', style: TextStyle(fontSize: 11, color: _muted)),
+      const Text('v0.4.0 α1 · Windows', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 
