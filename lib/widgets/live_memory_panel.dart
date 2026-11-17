@@ -61,6 +61,25 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     finally { if (mounted) setState(() => _busy = false); }
   }
 
+  Future<void> _openFloatingOverlay() async {
+    if (_busy || !Platform.isWindows) return;
+    final executable = File(Platform.resolvedExecutable);
+    final path = '${executable.parent.path}${Platform.pathSeparator}'
+        'EHTID-Overlay.exe';
+    if (!await File(path).exists()) {
+      _notice('В архиве нет EHTID-Overlay.exe. Распакуй весь ZIP целиком.');
+      return;
+    }
+    try {
+      await Process.start(path, const [], mode: ProcessStartMode.detached);
+      if (mounted) setState(() => _status =
+          'Плавающая панель запущена. Перейди в оконную/безрамочную игру. '
+          'Для эксклюзивного fullscreen оверлей может быть не виден.');
+    } catch (error) {
+      _notice('Не удалось запустить оверлей: $error');
+    }
+  }
+
   Future<void> _getFromScreenshot() async {
     final number = await showDialog<String>(context: context,
         builder: (_) => const OnScreenNumberPicker());
@@ -229,6 +248,10 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               OutlinedButton.icon(
                 onPressed: _busy ? null : _refreshProcesses,
                 icon: const Icon(Icons.refresh), label: const Text('Найти окна')),
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : _openFloatingOverlay,
+                icon: const Icon(Icons.picture_in_picture_alt_outlined),
+                label: const Text('Открыть поверх игры')),
               OutlinedButton.icon(
                 onPressed: _busy ? null : _getFromScreenshot,
                 icon: const Icon(Icons.touch_app_outlined),
