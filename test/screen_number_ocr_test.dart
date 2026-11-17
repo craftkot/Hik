@@ -127,4 +127,22 @@ void main() {
       '125');
   });
 
+  test('direct OCR candidates reject non-numeric and oversized values', () {
+    const invalid = [
+      ScreenNumberToken(value: 'NaN', raw: 'NaN', left: 0,
+        top: 0, width: 20, height: 20, confidence: 95),
+      ScreenNumberToken(value: '12/20', raw: '12/20', left: 0,
+        top: 0, width: 20, height: 20, confidence: 95),
+      ScreenNumberToken(value: '1234567890123', raw: '1234567890123',
+        left: 0, top: 0, width: 20, height: 20, confidence: 95),
+      ScreenNumberToken(value: '1e3', raw: '1e3', left: 0,
+        top: 0, width: 20, height: 20, confidence: 95),
+    ];
+    expect(ScreenNumberOcr.atPoint(invalid, 5, 5), isNull);
+    const valid = ScreenNumberToken(value: '-12.5', raw: '-12,5',
+      left: 0, top: 0, width: 20, height: 20, confidence: 90);
+    expect(ScreenNumberOcr.atPoint([...invalid, valid], 5, 5)?.value,
+      '-12.5');
+  });
+
 }
