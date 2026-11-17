@@ -36,4 +36,12 @@ service = """    <service
 if 'android:name=".OverlayService"' not in content:
     content = content.replace('</application>', service + '    </application>', 1)
 manifest.write_text(content, encoding='utf-8')
+
+# Reuse the original EHTID icon instead of the stock Flutter launcher logo.
+icon = root / 'assets/brand/logo.png'
+for density in ('mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'):
+    destination = root / f'android/app/src/main/res/mipmap-{density}/ic_launcher.png'
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(icon, destination)
+
 print('Installed Android SAF + consent-based overlay foreground service.')
