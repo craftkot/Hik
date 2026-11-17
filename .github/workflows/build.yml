@@ -123,10 +123,43 @@ jobs:
           path: dist/EHTID-GameLab-Alpha-Windows/**
           if-no-files-found: error
           retention-days: 30
+  verify-release-package:
+    name: Check release archives on PR and main
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: EHTID-GameLab-Alpha-Windows-Overlay
+          path: dist/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: EHTID-GameLab-Android-Overlay-APK
+          path: dist/android
+      - name: Verify complete Windows installation and standalone APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/windows/game_lab.exe
+          test -s dist/windows/flutter_windows.dll
+          test -s dist/windows/EHTID-MemoryHelper.exe
+          test -s dist/windows/EHTID-Overlay.exe
+          test -s dist/windows/START_HERE_RU.md
+          test -s dist/windows/data/flutter_assets/AssetManifest.bin
+          test -s dist/android/app-release.apk
+          test -s dist/android/START_HERE_RU.md
+          (cd dist && zip -q -r /tmp/EHTID-Windows-smoke.zip windows)
+          unzip -tq /tmp/EHTID-Windows-smoke.zip
+          sha256sum dist/android/app-release.apk /tmp/EHTID-Windows-smoke.zip
+
   publish-release:
     name: Publish GitHub Release (Windows ZIP + Android APK)
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [android, windows]
+    needs: [verify-release-package]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
