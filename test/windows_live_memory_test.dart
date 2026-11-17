@@ -55,6 +55,53 @@ void main() {
     }), throwsFormatException);
   });
 
+  test('relative refinement modes and value snapshots are validated', () {
+    expect(LiveChangeMode.values.map((mode) => mode.code), [
+      'changed', 'unchanged', 'increased', 'decreased',
+    ]);
+    final data = LiveMemoryScan.fromJson({
+      'addresses': ['0x12345', '0x23456'],
+      'values': ['-12', '1.25E+12'],
+      'truncated': false,
+    });
+    expect(data.values, ['-12', '1.25E+12']);
+    expect(() => data.values.add('0'), throwsUnsupportedError);
+    expect(() => LiveMemoryScan.fromJson({
+      'addresses': ['0x12345'],
+      'values': ['1', '2'],
+    }), throwsFormatException);
+    expect(() => LiveMemoryScan.fromJson({
+      'addresses': ['0x12345'],
+      'values': ['NaN'],
+    }), throwsFormatException);
+    expect(() => LiveMemoryScan.fromJson({
+      'addresses': ['0x12345'],
+      'values': ['not-a-number'],
+    }), throwsFormatException);
+  });
+
+  test('compare refuses invalid candidate list before starting helper', () async {
+    final service = WindowsLiveMemoryService();
+    await expectLater(service.compare(
+      pid: 999, format: LiveValueFormat.int32,
+      mode: LiveChangeMode.changed,
+      addresses: ['0x12345'],
+      baselines: [],
+    ), throwsFormatException);
+    await expectLater(service.compare(
+      pid: 999, format: LiveValueFormat.int64,
+      mode: LiveChangeMode.increased,
+      addresses: ['0x12345'],
+      baselines: ['9223372036854775808'],
+    ), throwsFormatException);
+    await expectLater(service.compare(
+      pid: 999, format: LiveValueFormat.int32,
+      mode: LiveChangeMode.unchanged,
+      addresses: ['malformed'],
+      baselines: ['100'],
+    ), throwsFormatException);
+  });
+
   test('non-Windows helper refuses operation instead of process access',
       () async {
     final service = WindowsLiveMemoryService();
