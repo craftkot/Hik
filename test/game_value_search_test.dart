@@ -84,6 +84,28 @@ void main() {
     expect(report.hits.single.file.id, 'okay');
   });
 
+  test('does not search backup, rollback or staging copies as live saves',
+      () async {
+    final files = [
+      _file('live', 'slot.sav', 4),
+      _file('backup', 'slot.sav.ehtid-backup-123.tmp', 4),
+      _file('rollback', 'slot.sav.ehtid-rollback-123.tmp', 4),
+      _file('stage', 'slot.sav.ehtid-stage-123.tmp', 4),
+    ];
+    final bytes = Uint8List.fromList([42, 0, 0, 0]);
+    final report = await GameValueSearch.search(
+      storage: _FakeStorage({
+        for (final file in files) file.id: bytes,
+      }),
+      files: files,
+      query: '42',
+    );
+    expect(report.scanned, 1);
+    expect(report.skipped, 3);
+    expect(report.hits, isNotEmpty);
+    expect(report.hits.every((hit) => hit.file.id == 'live'), true);
+  });
+
   test('cancellation, duplicates, global cap and explicit file limit',
       () async {
     final data = Uint8List.fromList([1, 0, 0, 0, 1, 0, 0, 0]);
