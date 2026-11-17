@@ -128,6 +128,22 @@ void main() {
     expect(report.hits.every((hit) => hit.file.id == 'live'), true);
   });
 
+  test('binary hit must match freshly opened bytes at the same offset', () async {
+    final original = Uint8List.fromList([9, 42, 0, 0, 0, 8]);
+    final file = _file('slot', 'slot.sav', original.length);
+    final report = await GameValueSearch.search(
+      storage: _FakeStorage({'slot': original}),
+      files: [file],
+      query: '42',
+    );
+    final hit = report.hits.single;
+    expect(GameValueSearch.matchesBinaryHit(hit, original), isTrue);
+    final changed = Uint8List.fromList(original)..[1] = 43;
+    expect(GameValueSearch.matchesBinaryHit(hit, changed), isFalse);
+    expect(GameValueSearch.matchesBinaryHit(hit, Uint8List(2)), isFalse);
+    expect(GameValueSearch.matchesBinaryHit(hit, Uint8List(0)), isFalse);
+  });
+
   test('cancellation, duplicates, global cap and explicit file limit',
       () async {
     final data = Uint8List.fromList([1, 0, 0, 0, 1, 0, 0, 0]);
