@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'core/archive_inspector.dart';
 import 'core/binary_save_editor.dart';
@@ -17,6 +18,7 @@ import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
 import 'widgets/onscreen_number_picker.dart';
 import 'widgets/live_memory_panel.dart';
+import 'widgets/android_floating_panel.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -84,7 +86,7 @@ class GameLabHome extends StatefulWidget {
   State<GameLabHome> createState() => _GameLabHomeState();
 }
 
-class _GameLabHomeState extends State<GameLabHome> {
+class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   late final GameStorage _storage = widget.storage ?? createStorage();
   final TextEditingController _editor = TextEditingController();
   final TextEditingController _query = TextEditingController();
@@ -93,6 +95,7 @@ class _GameLabHomeState extends State<GameLabHome> {
 
   Workspace _section = Workspace.preloads;
   String? _folder;
+  String? _overlayNumber;
   final List<String> _extraFolders = [];
   List<GameFile> _files = [];
   GameFile? _selected;
@@ -111,6 +114,12 @@ class _GameLabHomeState extends State<GameLabHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (Platform.isAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _receiveOverlayNumber();
+      });
+    }
     _editor.addListener(() {
       if (!mounted) return;
       final newDirty = _originalText != null &&
@@ -122,11 +131,36 @@ class _GameLabHomeState extends State<GameLabHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _editor.dispose();
     _query.dispose();
     _endpoint.dispose();
     _apiKey.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && Platform.isAndroid) {
+      _receiveOverlayNumber();
+    }
+  }
+
+  Future<void> _receiveOverlayNumber() async {
+    if (!mounted || !Platform.isAndroid) return;
+    try {
+      const channel = MethodChannel('ehtid.gamelab/overlay');
+      final value = await channel.invokeMethod<String>('takeNumber');
+      if (!mounted || value == null || value.isEmpty) return;
+      if (!RegExp(r'^[+-]?\d{1,12}(?:\.\d{1,6})?$').hasMatch(value)) return;
+      setState(() {
+        _overlayNumber = value;
+        if (!_dirty) _section = Workspace.cheats;
+        _state = 'Из плавающего окна получено число: $value';
+      });
+    } catch (_) {
+      // Overlay is optional; the file editor continues working.
+    }
   }
 
   void _message(String message) {
@@ -1081,13 +1115,14 @@ class _GameLabHomeState extends State<GameLabHome> {
     ),
     const SizedBox(height: 16),
     if (Platform.isWindows) const LiveMemoryPanel()
-    else Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: _panel,
-        borderRadius: BorderRadius.circular(16)),
-      child: const Text('На Android чтение памяти другого приложения '
-        'недоступно обычному APK. Работай с разрешёнными файлами сохранений.',
-        style: TextStyle(color: _muted))),
+    else AndroidFloatingPanel(
+      initialNumber: _overlayNumber,
+      onSearch: (number) async {
+        if (_folder == null) await _chooseFolder();
+        if (!mounted || _folder == null) return;
+        await _showGameWideSearch(initialQuery: number);
+      },
+    ),
     const SizedBox(height: 16),
     Container(
       padding: const EdgeInsets.all(20),
@@ -1137,7 +1172,7 @@ class _GameLabHomeState extends State<GameLabHome> {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.0 α1 · Windows', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.1 α2 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 

@@ -2,6 +2,8 @@ package com.ehtid.game_lab
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
@@ -17,6 +19,7 @@ import java.util.ArrayDeque
  */
 class MainActivity : FlutterActivity() {
     private val channelName = "ehtid.gamelab/storage"
+    private val overlayChannelName = "ehtid.gamelab/overlay"
     private val pickFolderCode = 8812
     private val maxFileSize = 8L * 1024 * 1024
     private var pendingPicker: MethodChannel.Result? = null
@@ -28,6 +31,42 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, overlayChannelName)
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "status" -> result.success(mapOf(
+                            "permission" to Settings.canDrawOverlays(this),
+                            "supported" to (Build.VERSION.SDK_INT >= 26)
+                        ))
+                        "start" -> {
+                            if (!Settings.canDrawOverlays(this)) {
+                                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:$packageName")))
+                                result.success("permission_required")
+                            } else {
+                                val service = Intent(this, OverlayService::class.java)
+                                if (Build.VERSION.SDK_INT >= 26) startForegroundService(service)
+                                else startService(service)
+                                result.success("started")
+                            }
+                        }
+                        "stop" -> {
+                            stopService(Intent(this, OverlayService::class.java))
+                            result.success("stopped")
+                        }
+                        "takeNumber" -> {
+                            val prefs = getSharedPreferences(OverlayService.PREFS, MODE_PRIVATE)
+                            val number = prefs.getString(OverlayService.KEY_NUMBER, null)
+                            prefs.edit().remove(OverlayService.KEY_NUMBER).apply()
+                            result.success(number)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (exception: Exception) {
+                    result.error("overlay", exception.message ?: "Overlay unavailable", null)
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, reply ->
                 try {
