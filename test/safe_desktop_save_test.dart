@@ -204,6 +204,35 @@ void main() {
     expect((await entries('.ehtid-backup-')).length, 1);
   });
 
+  test('unresolved crash rollback blocks another write without new backup',
+      () async {
+    final original = await save.readAsBytes();
+    final crashCopy = File('${save.path}.ehtid-rollback-interrupted.tmp');
+    await crashCopy.writeAsBytes(original, flush: true);
+    await expectLater(
+      SafeDesktopSaveWriter().write(save, bytes('hp=999'), expected: original),
+      throwsStateError,
+    );
+    expect(await save.readAsBytes(), original);
+    expect(await crashCopy.readAsBytes(), original);
+    expect(await entries('.ehtid-backup-'), isEmpty);
+    expect(await entries('.ehtid-pending-'), isEmpty);
+  });
+
+  test('missing original with crash rollback is not silently recreated',
+      () async {
+    final original = await save.readAsBytes();
+    final crashCopy = File('${save.path}.ehtid-rollback-interrupted.tmp');
+    await save.rename(crashCopy.path);
+    await expectLater(
+      SafeDesktopSaveWriter().write(save, bytes('hp=999'), expected: original),
+      throwsStateError,
+    );
+    expect(await save.exists(), isFalse);
+    expect(await crashCopy.readAsBytes(), original);
+    expect(await entries('.ehtid-backup-'), isEmpty);
+  });
+
   test('oversized replacements rejected before changing original', () async {
     await expectLater(
       SafeDesktopSaveWriter().write(
