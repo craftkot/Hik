@@ -72,6 +72,23 @@ class GameValueSearch {
     }.contains(file.extension);
   }
 
+  /// Revalidate a search hit against the freshly opened file. OCR and an
+  /// earlier scan cannot prove that the bytes still contain this value.
+  static bool matchesBinaryHit(GameValueHit hit, Uint8List bytes) {
+    final format = hit.numericFormat;
+    if (hit.isText || format == null || hit.offset < 0) return false;
+    try {
+      final expected = BinarySaveEditor.encode(hit.matchedValue, format);
+      if (hit.offset > bytes.length - expected.length) return false;
+      for (var i = 0; i < expected.length; i++) {
+        if (bytes[hit.offset + i] != expected[i]) return false;
+      }
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
   /// Bounded scan; callers may cancel and inspect progress between files.
   /// Returns a snapshot of results; it never writes any game file.
   static Future<GameSearchSummary> search({
