@@ -94,7 +94,34 @@ class ScreenNumberOcr {
     final radiusSquared = maxDistance * maxDistance;
     if (!radiusSquared.isFinite) return null;
     // Direct callers must not bypass the TSV numeric-value filter.
-    final numericValue = RegExp(r'^[+-]?\d{1,12}(?:\.\d{1,6})?\$');
+    final numericValue = RegExp(r'^[+-]?\d{1,12}(?:\.\d{1,6})?
+    ScreenNumberToken? closest;
+    var best = radiusSquared;
+    var ambiguous = false;
+    for (final token in tokens) {
+      // Public callers may supply tokens without passing through parseTsv.
+      // Never trust malformed geometry, confidence, or numeric text.
+      if (!numericValue.hasMatch(token.value) ||
+          token.left < 0 || token.top < 0 ||
+          token.width <= 0 || token.height <= 0 ||
+          !token.confidence.isFinite || token.confidence < 30 ||
+          token.confidence > 100) continue;
+      final distance = token.distanceSquaredTo(x, y);
+      if (!distance.isFinite || distance > best) continue;
+      if (closest == null || distance < best) {
+        closest = token;
+        best = distance;
+        ambiguous = false;
+      } else if (distance == best) {
+        // Conflicting equidistant readings require manual selection.
+        if (token.value != closest.value) ambiguous = true;
+        if (token.confidence > closest.confidence) closest = token;
+      }
+    }
+    return ambiguous ? null : closest;
+  }
+}
+);
     ScreenNumberToken? closest;
     var best = radiusSquared;
     var ambiguous = false;
