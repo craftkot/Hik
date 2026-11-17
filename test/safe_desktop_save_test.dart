@@ -151,7 +151,7 @@ void main() {
     final edited = bytes('hp=999;coins=100');
     final backupPath = await writer.write(save, edited, expected: original);
     final undoBackup = await writer.restoreBackup(
-      save, File(backupPath), expectedCurrent: edited, confirmed: true);
+      save, File(backupPath), expectedCurrent: edited, expectedBackup: original, confirmed: true);
     expect(await save.readAsBytes(), original);
     expect(await File(undoBackup).readAsBytes(), edited);
     expect(await File(backupPath).readAsBytes(), original);
@@ -165,7 +165,7 @@ void main() {
       save, bytes('hp=999'), expected: before);
     await expectLater(
       writer.restoreBackup(save, File(backupPath),
-          expectedCurrent: bytes('hp=999'), confirmed: false),
+          expectedCurrent: bytes('hp=999'), expectedBackup: before, confirmed: false),
       throwsStateError);
     expect(await save.readAsBytes(), bytes('hp=999'));
   });
@@ -178,15 +178,30 @@ void main() {
     await save.writeAsBytes(bytes('hp=250;game-updated'));
     await expectLater(
       writer.restoreBackup(save, File(backupPath),
-          expectedCurrent: bytes('hp=999'), confirmed: true),
+          expectedCurrent: bytes('hp=999'), expectedBackup: before, confirmed: true),
       throwsStateError);
     final unrelated = File('${scratch.path}/other.ehtid-backup-test.bak');
     await unrelated.writeAsBytes(before);
     await expectLater(
       writer.restoreBackup(save, unrelated,
-          expectedCurrent: bytes('hp=250;game-updated'), confirmed: true),
+          expectedCurrent: bytes('hp=250;game-updated'), expectedBackup: before, confirmed: true),
       throwsStateError);
     expect(await save.readAsBytes(), bytes('hp=250;game-updated'));
+  });
+
+  test('restore refuses backup changed after preview without modifying save',
+      () async {
+    final writer = SafeDesktopSaveWriter();
+    final original = await save.readAsBytes();
+    final edited = bytes('hp=999');
+    final backupPath = await writer.write(save, edited, expected: original);
+    await File(backupPath).writeAsBytes(bytes('hp=1;tampered'), flush: true);
+    await expectLater(
+      writer.restoreBackup(save, File(backupPath),
+          expectedCurrent: edited, expectedBackup: original, confirmed: true),
+      throwsStateError);
+    expect(await save.readAsBytes(), edited);
+    expect((await entries('.ehtid-backup-')).length, 1);
   });
 
   test('oversized replacements rejected before changing original', () async {
