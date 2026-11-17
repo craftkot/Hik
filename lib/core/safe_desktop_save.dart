@@ -61,6 +61,16 @@ class SafeDesktopSaveWriter {
     if (replacement.length > maxLength) {
       throw StateError('Файл больше лимита безопасной записи (8 МиБ)');
     }
+    // A previous interrupted two-rename swap may have left the original
+    // in a rollback file. Never overwrite that evidence with another edit.
+    final rollbackPrefix = '${original.uri.pathSegments.last}.ehtid-rollback-';
+    await for (final sibling in original.parent.list(followLinks: false)) {
+      final name = sibling.uri.pathSegments.last;
+      if (name.startsWith(rollbackPrefix) && name.endsWith('.tmp')) {
+        throw StateError('Найден аварийный файл отката: ${sibling.path}. '
+            'Проверь и восстанови сейв вручную перед новой записью.');
+      }
+    }
     if (await FileSystemEntity.type(original.path, followLinks: false) !=
         FileSystemEntityType.file) {
       throw StateError('Исходный сейв отсутствует или является ссылкой');
