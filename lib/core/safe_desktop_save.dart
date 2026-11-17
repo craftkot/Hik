@@ -21,12 +21,13 @@ class SafeDesktopSaveWriter {
 
   /// Restores only a backup created for this exact save path.
   /// The caller must show a preview and obtain explicit confirmation.
-  /// [expectedCurrent] prevents overwriting a save modified after preview.
+  /// [expectedCurrent] and [expectedBackup] bind confirmation to both previews.
   /// The normal writer makes a new verified backup of the current save.
   Future<String> restoreBackup(
     File original,
     File backup, {
     required Uint8List expectedCurrent,
+    required Uint8List expectedBackup,
     required bool confirmed,
   }) async {
     if (!confirmed) throw StateError('Восстановление не подтверждено');
@@ -44,6 +45,9 @@ class SafeDesktopSaveWriter {
     final restored = await backup.readAsBytes();
     if (restored.length > maxLength) {
       throw StateError('Резервная копия превышает лимит 8 МиБ');
+    }
+    if (!_sameBytes(restored, expectedBackup)) {
+      throw StateError('Бэкап изменился после предпросмотра. Проверь его заново.');
     }
     return write(original, restored, expected: expectedCurrent);
   }
