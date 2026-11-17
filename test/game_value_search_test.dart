@@ -19,7 +19,8 @@ class _FakeStorage implements GameStorage {
   @override
   Future<Uint8List> readPreview(GameFile file) => read(file);
   @override
-  Future<String> writeWithBackup(GameFile file, Uint8List data) async =>
+  Future<String> writeWithBackup(GameFile file, Uint8List data,
+      {Uint8List? expected}) async =>
       throw UnimplementedError();
 }
 
