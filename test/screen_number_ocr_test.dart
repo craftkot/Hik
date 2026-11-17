@@ -156,4 +156,16 @@ void main() {
   });
 
 
+  test('TSV parser and tap selector agree on complete numeric values', () {
+    const header = 'left\ttop\twidth\theight\tconf\ttext';
+    final parsed = ScreenNumberOcr.parseTsv(
+      '$header\n'
+      '0\t0\t20\t20\t95\t125abc\n'
+      '30\t0\t20\t20\t95\t-12,5\n',
+    );
+    expect(parsed.map((token) => token.value), ['-12.5']);
+    expect(ScreenNumberOcr.atPoint(parsed, 5, 5), isNull);
+    expect(ScreenNumberOcr.atPoint(parsed, 35, 5)?.value, '-12.5');
+  });
+
 }
