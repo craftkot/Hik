@@ -17,6 +17,17 @@ enum LiveValueFormat {
   final int width;
 }
 
+enum LiveChangeMode {
+  changed('changed', 'Изменилось'),
+  unchanged('unchanged', 'Не изменилось'),
+  increased('increased', 'Увеличилось'),
+  decreased('decreased', 'Уменьшилось');
+
+  const LiveChangeMode(this.code, this.label);
+  final String code;
+  final String label;
+}
+
 class LiveGameProcess {
   const LiveGameProcess({required this.pid, required this.name, required this.title});
   final int pid;
@@ -30,8 +41,11 @@ class LiveMemoryScan {
     required this.scannedBytes,
     required this.truncated,
     required this.regions,
+    this.values = const [],
   });
   final List<String> addresses;
+  /// Snapshot of the current value for each address returned by relative scan.
+  final List<String> values;
   final int scannedBytes;
   final bool truncated;
   final int regions;
@@ -43,8 +57,17 @@ class LiveMemoryScan {
             !RegExp(r'^0x[0-9a-fA-F]{5,16}$').hasMatch(value))) {
       throw const FormatException('Некорректные адреса в результате');
     }
+    final values = (json['values'] as List<dynamic>?) ?? const [];
+    if (values.isNotEmpty &&
+        (values.length != addresses.length ||
+         values.any((item) => item is! String ||
+           !RegExp(r'^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$')
+             .hasMatch(item)))) {
+      throw const FormatException('Некорректный список числовых снимков');
+    }
     return LiveMemoryScan(
       addresses: List<String>.unmodifiable(addresses.cast<String>()),
+      values: List<String>.unmodifiable(values.cast<String>()),
       scannedBytes: (json['scannedBytes'] as num?)?.toInt() ?? 0,
       truncated: json['truncated'] == true,
       regions: (json['regions'] as num?)?.toInt() ?? 0,
@@ -188,6 +211,43 @@ class WindowsLiveMemoryService {
       'addresses': addresses,
     });
     return LiveMemoryScan.fromJson(response);
+  }
+
+  /// Relative refinement across already-found addresses only.
+  /// Every candidate needs its own previous numeric baseline to avoid
+  /// treating unrelated RAM locations as one HP value.
+  Future<LiveMemoryScan> compare({
+    required int pid,
+    required LiveValueFormat format,
+    required List<String> addresses,
+    required List<String> baselines,
+    required LiveChangeMode mode,
+  }) async {
+    if (addresses.isEmpty || addresses.length > 5000 ||
+        addresses.length != baselines.length) {
+      throw const FormatException('Нужны 1–5000 адресов со снимками значений');
+    }
+    for (final value in baselines) {
+      validateValue(value, format);
+    }
+    for (final address in addresses) {
+      if (!RegExp(r'^0x[0-9a-fA-F]{5,16}$').hasMatch(address)) {
+        throw const FormatException('Некорректный адрес кандидата');
+      }
+    }
+    final response = await _request({
+      'command': 'compare',
+      'pid': pid,
+      'format': format.code,
+      'mode': mode.code,
+      'addresses': addresses,
+      'baselines': baselines,
+    });
+    final compared = LiveMemoryScan.fromJson(response);
+    if (compared.values.length != compared.addresses.length) {
+      throw const FormatException('Модуль не вернул значения для адресов');
+    }
+    return compared;
   }
 
   Future<void> write({
