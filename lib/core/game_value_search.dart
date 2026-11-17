@@ -56,7 +56,12 @@ class GameValueSearch {
   /// extensions, save blobs, JSON, ini, sqlite, XML, and extensionless files.
   /// Limits below prevent huge asset bundles from exhausting mobile memory.
   static bool isCandidate(GameFile file) {
-    if (file.name.toLowerCase().contains('.ehtid-backup-')) return false;
+    // Recovery and backup artifacts are not live game saves. Never suggest
+    // editing them as matches for a number picked from a screenshot.
+    final name = file.name.toLowerCase();
+    if (name.contains('.ehtid-backup-') ||
+        name.contains('.ehtid-rollback-') ||
+        name.contains('.ehtid-stage-')) return false;
     if (file.size < 1 || file.size > maxEditableBytes) return false;
     return !const <String>{
       '.exe', '.dll', '.so', '.dylib', '.pdb', '.class', '.dex',
