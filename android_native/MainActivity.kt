@@ -106,7 +106,8 @@ class MainActivity : FlutterActivity() {
                             val name = call.argument<String>("name") ?: error("Missing name")
                             val data = call.argument<ByteArray>("data") ?: error("Missing data")
                             if (data.size > maxFileSize) error("File exceeds safe write limit")
-                            reply.success(writeWithBackup(uri, name, data))
+                            val expected = call.argument<ByteArray>("expected")
+                            reply.success(writeWithBackup(uri, name, data, expected))
                         }
                         else -> reply.notImplemented()
                     }
@@ -232,8 +233,13 @@ class MainActivity : FlutterActivity() {
         return data.toByteArray()
     }
 
-    private fun writeWithBackup(uri: Uri, name: String, content: ByteArray): String {
+    private fun writeWithBackup(
+        uri: Uri, name: String, content: ByteArray, expected: ByteArray?
+    ): String {
         val entry = checkDocumentAccess(uri)
+        if (expected != null && !readBytes(uri).contentEquals(expected)) {
+            error("Game save changed after opening; reload it before editing")
+        }
         val parent = DocumentsContract.buildDocumentUriUsingTree(
             entry.tree, entry.parentId)
         val actualName = entry.name
@@ -251,6 +257,9 @@ class MainActivity : FlutterActivity() {
             } ?: error("Unable to write backup")
             if (!readBytes(uri).contentEquals(readBytes(backupUri))) {
                 error("Backup verification failed, original not changed")
+            }
+            if (expected != null && !readBytes(uri).contentEquals(expected)) {
+                error("Game changed the save during backup; write cancelled")
             }
             try {
                 contentResolver.openOutputStream(uri, "wt")?.use { output ->
