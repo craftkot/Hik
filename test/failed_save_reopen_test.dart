@@ -61,9 +61,9 @@ void main() {
     expect(find.text('Выбери файл'), findsOneWidget);
     expect(find.textContaining('Не удалось прочесть файл'), findsWidgets);
     // The previously selected value is no longer available for writing.
-    final apply = tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Применить'));
-    expect(apply.onPressed, isNull);
+    // With no selected file, the detail pane is replaced by the placeholder,
+    // so there is no apply button to invoke.
+    expect(find.widgetWithText(FilledButton, 'Применить'), findsNothing);
     expect(storage.reads, 2);
   });
 }
