@@ -164,7 +164,11 @@ void main() {
       '30\t0\t20\t20\t95\t-12,5\n',
     );
     expect(parsed.map((token) => token.value), ['-12.5']);
-    expect(ScreenNumberOcr.atPoint(parsed, 5, 5), isNull);
+    // The valid token starts at x=30, only 25px from (5, 5).
+    // Restrict the radius so this checks rejection of the malformed token,
+    // rather than accidentally selecting the nearby valid token.
+    expect(ScreenNumberOcr.atPoint(parsed, 5, 5, maxDistance: 20), isNull);
+    expect(ScreenNumberOcr.atPoint(parsed, 5, 5)?.value, '-12.5');
     expect(ScreenNumberOcr.atPoint(parsed, 35, 5)?.value, '-12.5');
   });
 
