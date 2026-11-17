@@ -144,6 +144,51 @@ void main() {
     expect(await save.readAsBytes(), bytes('hp=75'));
   });
 
+
+  test('confirmed restore preserves a new backup of the edited save', () async {
+    final writer = SafeDesktopSaveWriter();
+    final original = await save.readAsBytes();
+    final edited = bytes('hp=999;coins=100');
+    final backupPath = await writer.write(save, edited, expected: original);
+    final undoBackup = await writer.restoreBackup(
+      save, File(backupPath), expectedCurrent: edited, confirmed: true);
+    expect(await save.readAsBytes(), original);
+    expect(await File(undoBackup).readAsBytes(), edited);
+    expect(await File(backupPath).readAsBytes(), original);
+  });
+
+  test('restore requires explicit confirmation and does not change bytes',
+      () async {
+    final writer = SafeDesktopSaveWriter();
+    final before = await save.readAsBytes();
+    final backupPath = await writer.write(
+      save, bytes('hp=999'), expected: before);
+    await expectLater(
+      writer.restoreBackup(save, File(backupPath),
+          expectedCurrent: bytes('hp=999'), confirmed: false),
+      throwsStateError);
+    expect(await save.readAsBytes(), bytes('hp=999'));
+  });
+
+  test('restore refuses stale preview and unrelated backup', () async {
+    final writer = SafeDesktopSaveWriter();
+    final before = await save.readAsBytes();
+    final backupPath = await writer.write(
+      save, bytes('hp=999'), expected: before);
+    await save.writeAsBytes(bytes('hp=250;game-updated'));
+    await expectLater(
+      writer.restoreBackup(save, File(backupPath),
+          expectedCurrent: bytes('hp=999'), confirmed: true),
+      throwsStateError);
+    final unrelated = File('${scratch.path}/other.ehtid-backup-test.bak');
+    await unrelated.writeAsBytes(before);
+    await expectLater(
+      writer.restoreBackup(save, unrelated,
+          expectedCurrent: bytes('hp=250;game-updated'), confirmed: true),
+      throwsStateError);
+    expect(await save.readAsBytes(), bytes('hp=250;game-updated'));
+  });
+
   test('oversized replacements rejected before changing original', () async {
     await expectLater(
       SafeDesktopSaveWriter().write(
