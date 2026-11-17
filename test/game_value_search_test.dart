@@ -84,6 +84,28 @@ void main() {
     expect(report.hits.single.file.id, 'okay');
   });
 
+  test('stale size metadata cannot bypass the actual payload limit',
+      () async {
+    final oversized = Uint8List(maxEditableBytes + 1);
+    // The advertised size looks safe, but the storage backend returns
+    // a larger payload containing an otherwise searchable number.
+    oversized[0] = 42;
+    final valid = Uint8List.fromList([42, 0, 0, 0]);
+    final report = await GameValueSearch.search(
+      storage: _FakeStorage({'stale': oversized, 'live': valid}),
+      files: [
+        _file('stale', 'stale.sav', 4),
+        _file('live', 'live.sav', 4),
+      ],
+      query: '42',
+    );
+    expect(report.scanned, 2);
+    expect(report.skipped, 1);
+    expect(report.readErrors, 0);
+    expect(report.hits, isNotEmpty);
+    expect(report.hits.every((hit) => hit.file.id == 'live'), true);
+  });
+
   test('does not search backup, rollback or staging copies as live saves',
       () async {
     final files = [
