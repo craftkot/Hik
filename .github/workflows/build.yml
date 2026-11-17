@@ -29,10 +29,20 @@ jobs:
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
       - run: flutter build apk --release
+      - name: Bundle Android overlay APK, logo and Russian instructions
+        run: |
+          mkdir -p dist/EHTID-GameLab-Alpha-Android
+          cp build/app/outputs/flutter-apk/app-release.apk dist/EHTID-GameLab-Alpha-Android/
+          cp docs/ALPHA_ANDROID_RU.md dist/EHTID-GameLab-Alpha-Android/START_HERE_RU.md
+          cp assets/brand/logo.png dist/EHTID-GameLab-Alpha-Android/EHTID_ICON.png
+          test -s dist/EHTID-GameLab-Alpha-Android/app-release.apk
+          test -s dist/EHTID-GameLab-Alpha-Android/START_HERE_RU.md
       - uses: actions/upload-artifact@v4
         with:
           name: EHTID-GameLab-Android-Overlay-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: dist/EHTID-GameLab-Alpha-Android/**
+          if-no-files-found: error
+          retention-days: 30
 
   windows:
     runs-on: windows-latest
