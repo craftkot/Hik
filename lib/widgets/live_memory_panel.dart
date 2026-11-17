@@ -25,6 +25,9 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
   LiveMemoryScan? _result;
   _LastPatch? _lastPatch;
   String? _expected;
+  /// Independent last-observed number for each candidate address.
+  Map<String, String> _snapshots = const {};
+  LiveChangeMode _changeMode = LiveChangeMode.changed;
   int _budgetMiB = 512;
   bool _busy = false;
   String _status = 'Выбери окно своей одиночной игры и введи число HP, маны или денег.';
@@ -54,6 +57,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
         _processes = found;
         _selected = found.where((p) => p.pid == _selected?.pid).firstOrNull;
         _result = null; _expected = null; _lastPatch = null;
+        _snapshots = const {};
         _status = found.isEmpty ? 'Нет видимых окон. Сначала открой одиночную игру.'
             : 'Найдено ${found.length} окон. Выбери игровой процесс.';
       });
@@ -87,6 +91,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     setState(() {
       _value.text = number;
       _result = null; _expected = null; _lastPatch = null;
+        _snapshots = const {};
       _status = 'OCR: ${number}. Теперь выбери игру и запусти поиск. '
           'Скриншот не раскрывает адрес памяти сам по себе.';
     });
@@ -116,6 +121,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       if (!mounted || game.pid != _selected?.pid) return;
       setState(() {
         _result = result; _expected = number; _lastPatch = null;
+        _snapshots = {for (final address in result.addresses) address: number};
         _status = result.addresses.isEmpty
             ? 'Совпадений нет. Попробуй другой числовой тип.'
             : 'Кандидатов: ${result.addresses.length}. '
@@ -126,9 +132,48 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     finally { if (mounted) setState(() => _busy = false); }
   }
 
+  Future<void> _compare() async {
+    final game = _selected;
+    final candidates = _result?.addresses ?? const <String>[];
+    if (_busy || game == null || candidates.isEmpty) return;
+    final baselines = <String>[];
+    for (final address in candidates) {
+      final baseline = _snapshots[address];
+      if (baseline == null) {
+        _notice('Исходное значение неизвестно. Выполни новый поиск.');
+        return;
+      }
+      baselines.add(baseline);
+    }
+    setState(() {
+      _busy = true;
+      _status = 'Проверяю изменения по ${candidates.length} адресам…';
+    });
+    try {
+      final result = await _service.compare(
+        pid: game.pid, format: _format,
+        addresses: candidates, baselines: baselines, mode: _changeMode,
+      );
+      if (!mounted || _selected?.pid != game.pid) return;
+      setState(() {
+        _result = result;
+        _snapshots = {
+          for (var i = 0; i < result.addresses.length; i++)
+            result.addresses[i]: result.values[i],
+        };
+        _expected = result.values.length == 1 ? result.values.first : null;
+        _lastPatch = null;
+        _status = 'Фильтр «${_changeMode.label}»: осталось '
+            '${result.addresses.length} адресов. '
+            'После нового изменения в игре можно сравнить ещё раз.';
+      });
+    } catch (error) { _notice(error); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+
   Future<void> _edit(String address) async {
     final game = _selected;
-    final expected = _expected;
+    final expected = _snapshots[address];
     if (_busy || game == null || expected == null) return;
     _replacement.clear();
     final newValue = await showDialog<String>(context: context,
@@ -186,6 +231,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
         _result = LiveMemoryScan(addresses: [address],
             scannedBytes: 0, truncated: false, regions: 0);
         _value.text = newValue; _expected = newValue;
+        _snapshots = {address: newValue};
         _status = 'Готово: ${expected} → ${newValue} по ${address}. '
           'Откат возможен, пока игра не изменила значение сама.';
       });
@@ -205,6 +251,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       setState(() {
         _lastPatch = null; _value.text = item.oldValue;
         _expected = item.oldValue;
+        _snapshots = {item.address: item.oldValue};
         _status = 'Проверено: исходное значение восстановлено.';
       });
     } catch (error) { _notice('Откат не выполнен: $error'); }
@@ -273,6 +320,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               onChanged: _busy ? null : (pid) => setState(() {
                 _selected = _processes.where((p) => p.pid == pid).firstOrNull;
                 _result = null; _expected = null; _lastPatch = null;
+        _snapshots = const {};
               }),
             ),
             const SizedBox(height: 10),
@@ -290,6 +338,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               onChanged: _busy ? null : (fmt) => setState(() {
                 if (fmt != null) _format = fmt;
                 _result = null; _expected = null; _lastPatch = null;
+        _snapshots = const {};
               }),
             ),
             const SizedBox(height: 8),
@@ -317,6 +366,27 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                   icon: const Icon(Icons.undo),
                   label: const Text('Откатить запись')),
             ]),
+            const SizedBox(height: 8),
+            Wrap(spacing: 9, runSpacing: 9, crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(width: 188, child: DropdownButtonFormField<LiveChangeMode>(
+                  initialValue: _changeMode,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Фильтр изменения', isDense: true),
+                  items: LiveChangeMode.values.map((mode) => DropdownMenuItem(
+                    value: mode, child: Text(mode.label,
+                        style: const TextStyle(fontSize: 12)))).toList(),
+                  onChanged: _busy ? null : (mode) {
+                    if (mode != null) setState(() => _changeMode = mode);
+                  },
+                )),
+                OutlinedButton.icon(
+                  onPressed: _busy || hits.isEmpty ? null : _compare,
+                  icon: const Icon(Icons.compare_arrows),
+                  label: const Text('Сравнить с прошлым значением')),
+              ],
+            ),
             if (_busy) const Padding(padding: EdgeInsets.only(top: 10),
                 child: LinearProgressIndicator()),
             const SizedBox(height: 12),
@@ -340,7 +410,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                           color: _purple, size: 19),
                         title: Text(hits[i],
                           style: const TextStyle(fontFamily: 'monospace')),
-                        subtitle: Text(_expected ?? ''),
+                        subtitle: Text(_snapshots[hits[i]] ?? ''),
                         trailing: const Icon(Icons.edit_outlined, color: _cyan),
                         onTap: _busy ? null : () => _edit(hits[i])))),
             ],
