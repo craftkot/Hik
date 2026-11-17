@@ -31,7 +31,7 @@ jobs:
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
-          name: EHTID-GameLab-Android-APK
+          name: EHTID-GameLab-Android-Overlay-APK
           path: build/app/outputs/flutter-apk/app-release.apk
 
   windows:
@@ -65,6 +65,9 @@ jobs:
       - name: Build single-file Windows x64 memory helper
         shell: pwsh
         run: dotnet publish tool/windows-memory-helper/EHTID-MemoryHelper.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o build/memory-helper
+      - name: Build topmost Windows floating overlay
+        shell: pwsh
+        run: dotnet publish tool/windows-overlay/EHTID-Overlay.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o build/overlay
       - name: Smoke-test native offline memory helper
         shell: pwsh
         run: |
@@ -82,20 +85,22 @@ jobs:
           New-Item -ItemType Directory -Force $dist | Out-Null
           Copy-Item -Path "$release/*" -Destination $dist -Recurse -Force
           Copy-Item 'build/memory-helper/EHTID-MemoryHelper.exe' $dist -Force
+          Copy-Item 'build/overlay/EHTID-Overlay.exe' $dist -Force
           Copy-Item 'docs/ALPHA_WINDOWS_RU.md' "$dist/START_HERE_RU.md" -Force
           Copy-Item 'assets/brand/logo.png' "$dist/EHTID_ICON.png" -Force
           $text = @'
-          EHTID GAME LAB — WINDOWS ALPHA 0.4.0
+          EHTID GAME LAB — WINDOWS ALPHA 0.4.1
           1. Распакуй весь архив, не запускай из ZIP.
           2. Запусти game_lab.exe.
-          3. Прочти START_HERE_RU.md (подробная инструкция на русском).
-          4. Для читов выбирай только свои одиночные игры.
-          5. Для редактора сейвов делай резервную копию до изменения.
+          3. Открой «Читы (соло)» → «Открыть поверх игры».
+          4. В плавающей панели ищи и изменяй значения лишь своей офлайн-игры.
+          5. Прочитай START_HERE_RU.md. Сделай копию сейвов перед правкой.
           '@
           [IO.File]::WriteAllText((Join-Path $dist 'START_HERE.txt'), $text, [Text.UTF8Encoding]::new($true))
           foreach ($entry in @(
             'game_lab.exe', 'flutter_windows.dll',
-            'EHTID-MemoryHelper.exe', 'START_HERE_RU.md',
+            'EHTID-MemoryHelper.exe', 'EHTID-Overlay.exe',
+            'START_HERE_RU.md',
             'EHTID_ICON.png', 'data/flutter_assets/AssetManifest.bin'
           )) {
             if (!(Test-Path (Join-Path $dist $entry))) {
@@ -104,7 +109,7 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: EHTID-GameLab-Alpha-Windows
+          name: EHTID-GameLab-Alpha-Windows-Overlay
           path: dist/EHTID-GameLab-Alpha-Windows/**
           if-no-files-found: error
           retention-days: 30
