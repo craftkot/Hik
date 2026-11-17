@@ -44,12 +44,17 @@ internal sealed class OverlayForm : Form
     private readonly Button _refresh = ActionButton("Найти игры");
     private readonly Button _scan = ActionButton("Первый поиск");
     private readonly Button _refine = ActionButton("Уточнить");
+    private readonly Button _compare = ActionButton("Сравнить");
+    private readonly ComboBox _comparison = new() {
+        DropDownStyle = ComboBoxStyle.DropDownList
+    };
     private readonly Button _write = ActionButton("Записать адрес");
     private readonly Button _restore = ActionButton("Откат");
     private readonly Button _topmost = ActionButton("Поверх всех: ВКЛ");
     private readonly Button _collapse = ActionButton("Свернуть");
     private CancellationTokenSource? _operation;
     private List<string> _hits = new();
+    private List<string> _baselines = new();
     private string? _expected;
     private UndoRecord? _undo;
     private bool _busy;
@@ -57,8 +62,8 @@ internal sealed class OverlayForm : Form
     public OverlayForm()
     {
         Text = "EHTID · плавающий редактор";
-        ClientSize = new Size(370, 620);
-        MinimumSize = new Size(355, 420);
+        ClientSize = new Size(390, 710);
+        MinimumSize = new Size(355, 660);
         MaximumSize = new Size(650, 900);
         FormBorderStyle = FormBorderStyle.SizableToolWindow;
         StartPosition = FormStartPosition.Manual;
@@ -74,14 +79,14 @@ internal sealed class OverlayForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 1,
-            RowCount = 11,
+            RowCount = 12,
             BackColor = Dark
         };
-        for (int i = 0; i < 11; i++)
+        for (int i = 0; i < 12; i++)
             body.RowStyles.Add(new RowStyle(SizeType.Absolute, i switch {
                 0 => 34, 1 => 31, 2 => 49, 3 => 49,
-                4 => 47, 5 => 47, 6 => 36, 7 => 32,
-                8 => 38, 9 => 180, _ => 72
+                4 => 47, 5 => 47, 6 => 46, 7 => 36, 8 => 32,
+                9 => 38, 10 => 180, _ => 72
             }));
         Controls.Add(body);
 
@@ -132,7 +137,23 @@ internal sealed class OverlayForm : Form
         limitRow.Controls.Add(_budget);
         body.Controls.Add(limitRow, 0, 5);
 
-        body.Controls.Add(SmallLabel("КАНДИДАТЫ / выбери адрес для точечной записи"), 0, 6);
+        var compareRow = Row();
+        _comparison.Width = 172; _comparison.BackColor = Panel;
+        _comparison.ForeColor = Color.White;
+        _comparison.Items.AddRange(new object[] {
+            new FormatItem("changed", "Изменилось"),
+            new FormatItem("unchanged", "Не изменилось"),
+            new FormatItem("increased", "Увеличилось"),
+            new FormatItem("decreased", "Уменьшилось")
+        });
+        _comparison.SelectedIndex = 0;
+        _compare.Width = 160;
+        _compare.Click += async (_, _) => await CompareCandidates();
+        compareRow.Controls.Add(_comparison);
+        compareRow.Controls.Add(_compare);
+        body.Controls.Add(compareRow, 0, 6);
+
+        body.Controls.Add(SmallLabel("КАНДИДАТЫ / выбери адрес для точечной записи"), 0, 7);
 
         var changeRow = Row();
         _replacement.Width = 205; _replacement.PlaceholderText = "Новое значение";
@@ -141,7 +162,7 @@ internal sealed class OverlayForm : Form
         _write.Click += async (_, _) => await WriteSelected();
         changeRow.Controls.Add(_replacement);
         changeRow.Controls.Add(_write);
-        body.Controls.Add(changeRow, 0, 7);
+        body.Controls.Add(changeRow, 0, 8);
 
         var actions = Row();
         _restore.Width = 80; _topmost.Width = 150; _collapse.Width = 100;
@@ -152,18 +173,19 @@ internal sealed class OverlayForm : Form
         };
         _collapse.Click += (_, _) => WindowState = FormWindowState.Minimized;
         actions.Controls.Add(_restore); actions.Controls.Add(_topmost); actions.Controls.Add(_collapse);
-        body.Controls.Add(actions, 0, 8);
+        body.Controls.Add(actions, 0, 9);
 
         _addresses.Dock = DockStyle.Fill;
         _addresses.BackColor = Panel; _addresses.ForeColor = Cyan;
         _addresses.BorderStyle = BorderStyle.FixedSingle;
         _addresses.Font = new Font("Consolas", 10F);
-        body.Controls.Add(_addresses, 0, 9);
+        body.Controls.Add(_addresses, 0, 10);
         _status.Dock = DockStyle.Fill; _status.ForeColor = Muted;
         _status.Padding = new Padding(2, 6, 2, 0);
-        body.Controls.Add(_status, 0, 10);
+        body.Controls.Add(_status, 0, 11);
 
         _refine.Enabled = false;
+        _compare.Enabled = false;
         _write.Enabled = false;
         _restore.Enabled = false;
         _addresses.SelectedIndexChanged += (_, _) => UpdateButtons();
@@ -196,6 +218,7 @@ internal sealed class OverlayForm : Form
     private void ClearSearch()
     {
         _hits.Clear();
+        _baselines.Clear();
         _addresses.Items.Clear();
         _expected = null;
         _undo = null;
@@ -206,7 +229,10 @@ internal sealed class OverlayForm : Form
     {
         _refresh.Enabled = !_busy; _scan.Enabled = !_busy;
         _refine.Enabled = !_busy && _hits.Count > 0;
-        _write.Enabled = !_busy && _expected != null && _addresses.SelectedIndex >= 0;
+        _compare.Enabled = !_busy && _hits.Count > 0 && _baselines.Count == _hits.Count;
+        _comparison.Enabled = !_busy;
+        _write.Enabled = !_busy && _baselines.Count == _hits.Count &&
+            _addresses.SelectedIndex >= 0;
         _restore.Enabled = !_busy && _undo != null;
         _type.Enabled = !_busy; _games.Enabled = !_busy;
         _budget.Enabled = !_busy;
@@ -310,6 +336,7 @@ internal sealed class OverlayForm : Form
             var result = await Request(payload);
             _hits = result.GetProperty("addresses").EnumerateArray()
                 .Select(x => x.GetString() ?? "").ToList();
+            _baselines = Enumerable.Repeat(value, _hits.Count).ToList();
             _addresses.Items.Clear();
             _addresses.Items.AddRange(_hits.Cast<object>().ToArray());
             _expected = value;
@@ -324,16 +351,51 @@ internal sealed class OverlayForm : Form
         finally { SetBusy(false); }
     }
 
+    private async Task CompareCandidates()
+    {
+        if (_busy || Pid is not int pid || _hits.Count == 0 ||
+            _hits.Count != _baselines.Count)
+            return;
+        var mode = (_comparison.SelectedItem as FormatItem)?.Code ?? "changed";
+        var candidates = _hits.ToArray();
+        var previousValues = _baselines.ToArray();
+        SetBusy(true, $"Фильтр «{mode}»: перечитываю {candidates.Length} адресов…");
+        try
+        {
+            var response = await Request(new {
+                command = "compare", pid, format = Format, mode,
+                addresses = candidates, baselines = previousValues
+            });
+            var addresses = response.GetProperty("addresses")
+                .EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+            var values = response.GetProperty("values")
+                .EnumerateArray().Select(x => x.GetString() ?? "").ToList();
+            if (addresses.Count != values.Count)
+                throw new InvalidOperationException("Scanned values and addresses are misaligned");
+            _hits = addresses;
+            _baselines = values;
+            _addresses.Items.Clear();
+            _addresses.Items.AddRange(_hits.Cast<object>().ToArray());
+            _expected = _baselines.Count == 1 ? _baselines[0] : null;
+            _undo = null;
+            _status.Text = $"После «{mode}» осталось {_hits.Count} адресов. " +
+                "Фильтр можно повторять после изменений в игре.";
+        }
+        catch (Exception error) { _status.Text = error.Message; }
+        finally { SetBusy(false); }
+    }
+
     private async Task WriteSelected()
     {
         if (_busy || Pid is not int pid || _addresses.SelectedItem is not string address ||
-            _expected == null) return;
+            _addresses.SelectedIndex < 0 || _addresses.SelectedIndex >= _baselines.Count)
+            return;
         var replacement = _replacement.Text.Trim().Replace(',', '.');
         if (!ValidNumber(replacement, Format)) {
             _status.Text = "Неверный формат нового значения"; return;
         }
         string format = Format;
-        string expected = _expected;
+        string expected = _baselines[_addresses.SelectedIndex];
         if (MessageBox.Show(this,
             $"Изменить ТОЛЬКО адрес {address} процесса PID {pid}?\n" +
             $"{expected} → {replacement}\n\n" +
@@ -350,6 +412,7 @@ internal sealed class OverlayForm : Form
             _expected = replacement;
             _value.Text = replacement;
             _hits = new List<string> { address };
+            _baselines = new List<string> { replacement };
             _addresses.Items.Clear(); _addresses.Items.Add(address);
             _addresses.SelectedIndex = 0;
             _status.Text = $"Записано и проверено: {address} · {expected} → {replacement}";
@@ -370,6 +433,7 @@ internal sealed class OverlayForm : Form
                 expected = restore.After, replacement = restore.Before
             });
             _expected = restore.Before; _value.Text = restore.Before;
+            _baselines = new List<string> { restore.Before };
             _undo = null;
             _status.Text = "Прежнее значение восстановлено и проверено.";
         }
