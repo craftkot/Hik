@@ -123,7 +123,7 @@ jobs:
           path: dist/EHTID-GameLab-Alpha-Windows/**
           if-no-files-found: error
           retention-days: 30
-publish-release:
+  publish-release:
     name: Publish GitHub Release (Windows ZIP + Android APK)
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: [android, windows]
