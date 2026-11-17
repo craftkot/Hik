@@ -23,11 +23,13 @@ class MainActivity : FlutterActivity() {
     private val pickFolderCode = 8812
     private val maxFileSize = 8L * 1024 * 1024
     private var pendingPicker: MethodChannel.Result? = null
-    private var grantedTree: Uri? = null
-    // The document IDs returned by SAF can be opaque, not path-like. Keep the
-    // parent relationship provided by the actual directory listing.
-    private val documentParents = HashMap<String, String>()
-    private val documentNames = HashMap<String, String>()
+
+    // A document ID alone is NOT a unique locator across different SAF trees.
+    // Cache the exact document URI and its originating tree/parent/name together.
+    // Otherwise scanning folder B invalidates reads and backups from folder A.
+    private data class DocumentEntry(val tree: Uri, val parentId: String,
+                                     val name: String)
+    private val documentEntries = HashMap<String, DocumentEntry>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -128,9 +130,7 @@ class MainActivity : FlutterActivity() {
         try {
             contentResolver.takePersistableUriPermission(uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            grantedTree = uri
-            documentParents.clear()
-            documentNames.clear()
+            // Preserve other previously selected tree grants and their files.
             result?.success(uri.toString())
         } catch (exception: Exception) {
             result?.error("permission", exception.message, null)
@@ -138,27 +138,32 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun checkAccess(tree: Uri) {
+        if (tree.scheme != "content") error("Only content:// tree URIs are permitted")
         val permitted = contentResolver.persistedUriPermissions.any {
             it.uri == tree && it.isReadPermission
         }
         if (!permitted) error("Select this folder with the system picker")
-        grantedTree = tree
     }
 
-    private fun checkDocumentAccess(uri: Uri) {
-        val tree = grantedTree ?: error("Choose a game folder first")
-        if (uri.authority != tree.authority) error("Document belongs to a different provider")
+    private fun checkDocumentAccess(uri: Uri): DocumentEntry {
         if (uri.scheme != "content") error("Only content:// document URIs are permitted")
-        val documentId = DocumentsContract.getDocumentId(uri)
-        if (!documentParents.containsKey(documentId)) {
-            error("Document not found in the selected folder scan")
-        }
-        checkAccess(tree)
+        val entry = documentEntries[uri.toString()]
+            ?: error("Document not found in any user-approved folder scan")
+        if (uri.authority != entry.tree.authority)
+            error("Document belongs to a different provider")
+        // Reconstruct URI from the granted root and document ID, rather than
+        // trusting a raw URI merely because its provider authority matches.
+        val expected = DocumentsContract.buildDocumentUriUsingTree(
+            entry.tree, DocumentsContract.getDocumentId(uri))
+        if (expected != uri) error("Document URI does not match its tree grant")
+        checkAccess(entry.tree)
+        return entry
     }
 
     private fun scanTree(tree: Uri): List<Map<String, Any>> {
-        documentParents.clear()
-        documentNames.clear()
+        // Stage a fresh scan. Only replace this tree's cached entries after the
+        // listing succeeded; do not discard entries from other granted roots.
+        val discovered = HashMap<String, DocumentEntry>()
         val rootId = DocumentsContract.getTreeDocumentId(tree)
         data class Pending(val id: String, val path: String, val depth: Int)
         val queue = ArrayDeque<Pending>()
@@ -185,9 +190,8 @@ class MainActivity : FlutterActivity() {
                     if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                         if (visited < 3500) queue.add(Pending(id, path, depth + 1))
                     } else if (!name.contains(".ehtid-backup-")) {
-                        documentParents[id] = parentId
-                        documentNames[id] = name
                         val document = DocumentsContract.buildDocumentUriUsingTree(tree, id)
+                        discovered[document.toString()] = DocumentEntry(tree, parentId, name)
                         result.add(mapOf(
                             "uri" to document.toString(),
                             "name" to name,
@@ -198,6 +202,9 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        val oldKeys = documentEntries.filterValues { entry -> entry.tree == tree }.keys
+        for (key in oldKeys) documentEntries.remove(key)
+        documentEntries.putAll(discovered)
         return result
     }
 
@@ -226,12 +233,10 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun writeWithBackup(uri: Uri, name: String, content: ByteArray): String {
-        val tree = grantedTree ?: error("No folder grant")
-        val docId = DocumentsContract.getDocumentId(uri)
-        val parentId = documentParents[docId]
-            ?: error("File is not part of the scanned folder")
-        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, parentId)
-        val actualName = documentNames[docId] ?: error("Unknown file name")
+        val entry = checkDocumentAccess(uri)
+        val parent = DocumentsContract.buildDocumentUriUsingTree(
+            entry.tree, entry.parentId)
+        val actualName = entry.name
         if (actualName != name) error("File name changed after scan")
         val backupName = "$actualName.ehtid-backup-${System.currentTimeMillis()}.bak"
         val backupUri = DocumentsContract.createDocument(contentResolver, parent,
