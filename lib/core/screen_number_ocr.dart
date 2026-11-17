@@ -87,8 +87,8 @@ class ScreenNumberOcr {
     double y, {
     double maxDistance = 30,
   }) {
-    if (!x.isFinite || !y.isFinite || !maxDistance.isFinite ||
-        maxDistance < 0) return null;
+    if (!x.isFinite || !y.isFinite || x < 0 || y < 0 ||
+        !maxDistance.isFinite || maxDistance < 0) return null;
     // Squaring an enormous but finite radius can overflow to Infinity,
     // accidentally accepting arbitrarily distant OCR tokens.
     final radiusSquared = maxDistance * maxDistance;
