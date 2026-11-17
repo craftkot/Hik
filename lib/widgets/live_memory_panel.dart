@@ -24,7 +24,6 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
   LiveValueFormat _format = LiveValueFormat.int32;
   LiveMemoryScan? _result;
   _LastPatch? _lastPatch;
-  String? _expected;
   /// Independent last-observed number for each candidate address.
   Map<String, String> _snapshots = const {};
   LiveChangeMode _changeMode = LiveChangeMode.changed;
@@ -56,7 +55,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       setState(() {
         _processes = found;
         _selected = found.where((p) => p.pid == _selected?.pid).firstOrNull;
-        _result = null; _expected = null; _lastPatch = null;
+        _result = null; _lastPatch = null;
         _snapshots = const {};
         _status = found.isEmpty ? 'Нет видимых окон. Сначала открой одиночную игру.'
             : 'Найдено ${found.length} окон. Выбери игровой процесс.';
@@ -90,7 +89,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     if (!mounted || number == null) return;
     setState(() {
       _value.text = number;
-      _result = null; _expected = null; _lastPatch = null;
+      _result = null; _lastPatch = null;
         _snapshots = const {};
       _status = 'OCR: ${number}. Теперь выбери игру и запусти поиск. '
           'Скриншот не раскрывает адрес памяти сам по себе.';
@@ -120,7 +119,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               value: number, budgetMiB: _budgetMiB);
       if (!mounted || game.pid != _selected?.pid) return;
       setState(() {
-        _result = result; _expected = number; _lastPatch = null;
+        _result = result; _lastPatch = null;
         _snapshots = {for (final address in result.addresses) address: number};
         _status = result.addresses.isEmpty
             ? 'Совпадений нет. Попробуй другой числовой тип.'
@@ -161,7 +160,6 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
           for (var i = 0; i < result.addresses.length; i++)
             result.addresses[i]: result.values[i],
         };
-        _expected = result.values.length == 1 ? result.values.first : null;
         _lastPatch = null;
         _status = 'Фильтр «${_changeMode.label}»: осталось '
             '${result.addresses.length} адресов. '
@@ -230,7 +228,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
         _lastPatch = _LastPatch(game.pid, address, _format, expected, newValue);
         _result = LiveMemoryScan(addresses: [address],
             scannedBytes: 0, truncated: false, regions: 0);
-        _value.text = newValue; _expected = newValue;
+        _value.text = newValue;
         _snapshots = {address: newValue};
         _status = 'Готово: ${expected} → ${newValue} по ${address}. '
           'Откат возможен, пока игра не изменила значение сама.';
@@ -250,7 +248,6 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       if (!mounted) return;
       setState(() {
         _lastPatch = null; _value.text = item.oldValue;
-        _expected = item.oldValue;
         _snapshots = {item.address: item.oldValue};
         _status = 'Проверено: исходное значение восстановлено.';
       });
@@ -319,7 +316,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                   maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
               onChanged: _busy ? null : (pid) => setState(() {
                 _selected = _processes.where((p) => p.pid == pid).firstOrNull;
-                _result = null; _expected = null; _lastPatch = null;
+                _result = null; _lastPatch = null;
         _snapshots = const {};
               }),
             ),
@@ -337,7 +334,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                 value: fmt, child: Text(fmt.label))).toList(),
               onChanged: _busy ? null : (fmt) => setState(() {
                 if (fmt != null) _format = fmt;
-                _result = null; _expected = null; _lastPatch = null;
+                _result = null; _lastPatch = null;
         _snapshots = const {};
               }),
             ),
