@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore EHTID logo asset
+        run: python3 tool/prepare_brand.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -34,19 +36,75 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore EHTID logo asset
+        run: python tool/prepare_brand.py
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
       - name: Create Windows platform scaffold
         run: flutter create --platforms=windows --org com.ehtid --project-name game_lab .
+      - name: Embed EHTID EXE icon
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $bitmap = [System.Drawing.Bitmap]::new((Resolve-Path 'assets/brand/logo.png').Path)
+          $icon = [System.Drawing.Icon]::FromHandle($bitmap.GetHicon())
+          $stream = [System.IO.File]::Create('windows/runner/resources/app_icon.ico')
+          try { $icon.Save($stream) }
+          finally { $stream.Dispose(); $icon.Dispose(); $bitmap.Dispose() }
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
       - run: flutter test
+      - name: Build single-file Windows x64 memory helper
+        shell: pwsh
+        run: dotnet publish tool/windows-memory-helper/EHTID-MemoryHelper.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o build/memory-helper
+      - name: Smoke-test native offline memory helper
+        shell: pwsh
+        run: |
+          $result = & build/memory-helper/EHTID-MemoryHelper.exe --selftest
+          Write-Host $result
+          if ($LASTEXITCODE -ne 0 -or $result -notmatch '"ok":true') {
+            throw 'Native memory helper read/write/readback self-test failed'
+          }
       - run: flutter build windows --release
+      - name: Assemble EHTID Game Lab Alpha portable directory
+        shell: pwsh
+        run: |
+          $release = 'build/windows/x64/runner/Release'
+          $dist = 'dist/EHTID-GameLab-Alpha-Windows'
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          Copy-Item -Path "$release/*" -Destination $dist -Recurse -Force
+          Copy-Item 'build/memory-helper/EHTID-MemoryHelper.exe' $dist -Force
+          Copy-Item 'docs/ALPHA_WINDOWS_RU.md' "$dist/START_HERE_RU.md" -Force
+          Copy-Item 'assets/brand/logo.png' "$dist/EHTID_ICON.png" -Force
+          $text = @'
+          EHTID GAME LAB — WINDOWS ALPHA 0.4.0
+          1. Распакуй весь архив, не запускай из ZIP.
+          2. Запусти game_lab.exe.
+          3. Прочти START_HERE_RU.md (подробная инструкция на русском).
+          4. Для читов выбирай только свои одиночные игры.
+          5. Для редактора сейвов делай резервную копию до изменения.
+          '@
+          [IO.File]::WriteAllText((Join-Path $dist 'START_HERE.txt'), $text, [Text.UTF8Encoding]::new($true))
+          foreach ($entry in @(
+            'game_lab.exe', 'flutter_windows.dll',
+            'EHTID-MemoryHelper.exe', 'START_HERE_RU.md',
+            'EHTID_ICON.png', 'data/flutter_assets/AssetManifest.bin'
+          )) {
+            if (!(Test-Path (Join-Path $dist $entry))) {
+              throw "Missing release payload: $entry"
+            }
+          }
       - uses: actions/upload-artifact@v4
         with:
-          name: EHTID-GameLab-Windows-portable
-          path: build/windows/x64/runner/Release/**
+          name: EHTID-GameLab-Alpha-Windows
+          path: dist/EHTID-GameLab-Alpha-Windows/**
+          if-no-files-found: error
+          retention-days: 30
