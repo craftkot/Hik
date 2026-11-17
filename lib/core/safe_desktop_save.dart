@@ -19,6 +19,35 @@ class SafeDesktopSaveWriter {
   bool _busy = false;
   static const int maxLength = 8 * 1024 * 1024;
 
+  /// Restores only a backup created for this exact save path.
+  /// The caller must show a preview and obtain explicit confirmation.
+  /// [expectedCurrent] prevents overwriting a save modified after preview.
+  /// The normal writer makes a new verified backup of the current save.
+  Future<String> restoreBackup(
+    File original,
+    File backup, {
+    required Uint8List expectedCurrent,
+    required bool confirmed,
+  }) async {
+    if (!confirmed) throw StateError('Восстановление не подтверждено');
+    if (!backup.path.startsWith('${original.path}.ehtid-backup-') ||
+        !backup.path.endsWith('.bak')) {
+      throw StateError('Резервная копия не относится к этому сейву');
+    }
+    if (await FileSystemEntity.type(backup.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      throw StateError('Резервная копия отсутствует или является ссылкой');
+    }
+    if (await backup.length() > maxLength) {
+      throw StateError('Резервная копия превышает лимит 8 МиБ');
+    }
+    final restored = await backup.readAsBytes();
+    if (restored.length > maxLength) {
+      throw StateError('Резервная копия превышает лимит 8 МиБ');
+    }
+    return write(original, restored, expected: expectedCurrent);
+  }
+
   Future<String> write(
     File original,
     Uint8List replacement, {
