@@ -145,4 +145,15 @@ void main() {
       '-12.5');
   });
 
+  test('direct OCR values must match the entire numeric token', () {
+    const tokens = [
+      ScreenNumberToken(value: '125abc', raw: '125abc', left: 0,
+        top: 0, width: 20, height: 20, confidence: 95),
+      ScreenNumberToken(value: '12.5.6', raw: '12.5.6', left: 0,
+        top: 0, width: 20, height: 20, confidence: 95),
+    ];
+    expect(ScreenNumberOcr.atPoint(tokens, 5, 5), isNull);
+  });
+
+
 }
