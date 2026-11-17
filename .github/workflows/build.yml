@@ -99,7 +99,7 @@ jobs:
           Copy-Item 'docs/ALPHA_WINDOWS_RU.md' "$dist/START_HERE_RU.md" -Force
           Copy-Item 'assets/brand/logo.png' "$dist/EHTID_ICON.png" -Force
           $text = @'
-          EHTID GAME LAB — WINDOWS ALPHA 0.4.1
+          EHTID GAME LAB — WINDOWS ALPHA 0.4.2
           1. Распакуй весь архив, не запускай из ZIP.
           2. Запусти game_lab.exe.
           3. Открой «Читы (соло)» → «Открыть поверх игры».
@@ -123,3 +123,131 @@ jobs:
           path: dist/EHTID-GameLab-Alpha-Windows/**
           if-no-files-found: error
           retention-days: 30
+  verify-release-package:
+    name: Check release archives on PR and main
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: EHTID-GameLab-Alpha-Windows-Overlay
+          path: dist/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: EHTID-GameLab-Android-Overlay-APK
+          path: dist/android
+      - name: Verify complete Windows installation and standalone APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist/windows/game_lab.exe
+          test -s dist/windows/flutter_windows.dll
+          test -s dist/windows/EHTID-MemoryHelper.exe
+          test -s dist/windows/EHTID-Overlay.exe
+          test -s dist/windows/START_HERE_RU.md
+          test -s dist/windows/data/flutter_assets/AssetManifest.bin
+          test -s dist/android/app-release.apk
+          test -s dist/android/START_HERE_RU.md
+          (cd dist && zip -q -r /tmp/EHTID-Windows-smoke.zip windows)
+          unzip -tq /tmp/EHTID-Windows-smoke.zip
+          sha256sum dist/android/app-release.apk /tmp/EHTID-Windows-smoke.zip
+
+  publish-release:
+    name: Publish GitHub Release (Windows ZIP + Android APK)
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    needs: [verify-release-package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine version and prevent overwrite of released binaries
+        id: release-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw="$(grep -m1 '^version:' pubspec.yaml | awk '{print $2}')"
+          version="${raw%%+*}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "Invalid pubspec.yaml release version: $version" >&2
+            exit 1
+          fi
+          tag="v${version}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $tag exists; never overwrite published binaries."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Preparing first publication for $tag"
+          fi
+
+      - uses: actions/download-artifact@v4
+        if: steps.release-version.outputs.exists == 'false'
+        with:
+          name: EHTID-GameLab-Alpha-Windows-Overlay
+          path: dist/windows
+
+      - uses: actions/download-artifact@v4
+        if: steps.release-version.outputs.exists == 'false'
+        with:
+          name: EHTID-GameLab-Android-Overlay-APK
+          path: dist/android
+
+      - name: Verify assets, build self-contained Windows ZIP and checksums
+        if: steps.release-version.outputs.exists == 'false'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.release-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -s dist/windows/game_lab.exe
+          test -s dist/windows/flutter_windows.dll
+          test -s dist/windows/EHTID-MemoryHelper.exe
+          test -s dist/windows/EHTID-Overlay.exe
+          test -s dist/windows/START_HERE_RU.md
+          test -s dist/windows/data/flutter_assets/AssetManifest.bin
+          test -s dist/android/app-release.apk
+          test -s dist/android/START_HERE_RU.md
+          mkdir -p release/EHTID-GameLab-Windows-x64
+          cp -a dist/windows/. release/EHTID-GameLab-Windows-x64/
+          (
+            cd release
+            zip -q -r "EHTID-GameLab-Windows-x64-v${RELEASE_VERSION}.zip" EHTID-GameLab-Windows-x64
+            rm -rf EHTID-GameLab-Windows-x64
+          )
+          cp dist/android/app-release.apk "release/EHTID-GameLab-Android-v${RELEASE_VERSION}.apk"
+          cp dist/android/START_HERE_RU.md release/EHTID-Android-Instruction-RU.md
+          (
+            cd release
+            sha256sum "EHTID-GameLab-Windows-x64-v${RELEASE_VERSION}.zip" \
+              "EHTID-GameLab-Android-v${RELEASE_VERSION}.apk" > SHA256SUMS.txt
+          )
+          test -s "release/EHTID-GameLab-Windows-x64-v${RELEASE_VERSION}.zip"
+          test -s "release/EHTID-GameLab-Android-v${RELEASE_VERSION}.apk"
+          ls -lh release/
+
+      - name: Publish immutable pre-release assets
+        if: steps.release-version.outputs.exists == 'false'
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release-version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "EHTID Game Lab $RELEASE_TAG · Windows + Android" \
+            --notes-file docs/RELEASE_NOTES_RU.md \
+            --prerelease
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json url,assets --jq '{url: .url, assets: [.assets[].name]}'
+
