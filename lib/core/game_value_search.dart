@@ -131,6 +131,15 @@ class GameValueSearch {
       }
       try {
         final bytes = await storage.read(file);
+        // File metadata can be stale or incorrect. Never scan a payload
+        // larger than the editor's supported limit after it is read.
+        if (bytes.length > maxEditableBytes) {
+          skipped++;
+          scanned++;
+          onProgress?.call(scanned, candidates.length);
+          await Future<void>.delayed(Duration.zero);
+          continue;
+        }
         final text = decodeEditableText(bytes);
         if (text != null) {
           final lowered = text.toLowerCase();
