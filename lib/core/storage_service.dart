@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import 'game_file.dart';
+import 'safe_desktop_save.dart';
 
 const int maxEditableBytes = 8 * 1024 * 1024;
 
@@ -14,7 +15,8 @@ abstract class GameStorage {
   Future<List<GameFile>> scan(String folder);
   Future<Uint8List> read(GameFile file);
   Future<Uint8List> readPreview(GameFile file);
-  Future<String> writeWithBackup(GameFile file, Uint8List data);
+  Future<String> writeWithBackup(GameFile file, Uint8List data,
+      {Uint8List? expected});
 }
 
 GameStorage createStorage() => Platform.isAndroid
@@ -59,14 +61,22 @@ class AndroidGameStorage implements GameStorage {
   }
 
   @override
-  Future<String> writeWithBackup(GameFile file, Uint8List data) async {
+  Future<String> writeWithBackup(GameFile file, Uint8List data,
+      {Uint8List? expected}) async {
     final backup = await _channel.invokeMethod<String>('writeWithBackup',
-        <String, dynamic>{'uri': file.id, 'data': data, 'name': file.name});
+        <String, dynamic>{
+          'uri': file.id, 'data': data, 'name': file.name,
+          'expected': expected,
+        });
     return backup ?? 'Резервная копия создана';
   }
 }
 
 class DesktopGameStorage implements GameStorage {
+  DesktopGameStorage({SafeDesktopSaveWriter? writer})
+      : _writer = writer ?? SafeDesktopSaveWriter();
+  final SafeDesktopSaveWriter _writer;
+
   @override
   Future<String?> chooseFolder() => FilePicker.platform.getDirectoryPath(
     dialogTitle: 'Выбери доступную папку игры',
@@ -82,7 +92,8 @@ class DesktopGameStorage implements GameStorage {
       if (entity is! File) continue;
       try {
         final path = p.relative(entity.path, from: folder);
-        if (p.split(path).length > 14 || p.basename(path).startsWith('.ehtid-')) continue;
+        if (p.split(path).length > 14 ||
+            p.basename(path).contains('.ehtid-')) continue;
         final size = await entity.length();
         result.add(GameFile(
           id: entity.path,
@@ -116,28 +127,8 @@ class DesktopGameStorage implements GameStorage {
   }
 
   @override
-  Future<String> writeWithBackup(GameFile file, Uint8List data) async {
-    if (data.length > maxEditableBytes) {
-      throw StateError('Файл больше лимита безопасной записи');
-    }
-    final original = File(file.id);
-    if (!await original.exists()) throw StateError('Исходный файл исчез');
-    final stamp = DateTime.now().millisecondsSinceEpoch;
-    final backup = '${file.id}.ehtid-backup-$stamp.bak';
-    await original.copy(backup); // Abort without touching original on failure.
-    await original.writeAsBytes(data, flush: true);
-    final check = await original.readAsBytes();
-    if (!_sameBytes(check, data)) {
-      throw StateError('Проверка записи не прошла. Копия: $backup');
-    }
-    return backup;
-  }
+  Future<String> writeWithBackup(GameFile file, Uint8List data,
+      {Uint8List? expected}) => _writer.write(
+        File(file.id), data, expected: expected);
 
-  bool _sameBytes(Uint8List a, Uint8List b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
 }

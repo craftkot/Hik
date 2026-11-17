@@ -529,7 +529,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         throw StateError('Файл изменился после открытия. Обнови его перед записью.');
       }
       final bytes = Uint8List.fromList(utf8.encode(_editor.text));
-      final backup = await _storage.writeWithBackup(selected, bytes);
+      final backup = await _storage.writeWithBackup(
+          selected, bytes, expected: original);
       final verify = await _storage.read(selected);
       if (!_bytesEqual(verify, bytes)) {
         throw StateError('Данные после записи не совпадают. Резервная копия: $backup');
@@ -610,7 +611,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (!_bytesEqual(onDisk, original)) {
         throw StateError('Сейв на диске изменился. Открой его заново.');
       }
-      final backup = await _storage.writeWithBackup(file, patched);
+      final backup = await _storage.writeWithBackup(
+          file, patched, expected: original);
       final verify = await _storage.read(file);
       if (!_bytesEqual(verify, patched)) {
         throw StateError('Проверка записи не прошла. Бэкап: $backup');
@@ -1172,7 +1174,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.2 α4 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.3 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 
