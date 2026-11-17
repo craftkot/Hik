@@ -5,11 +5,17 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'core/archive_inspector.dart';
+import 'core/binary_save_editor.dart';
 import 'core/game_file.dart';
+import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/storage_service.dart';
 import 'core/translation_service.dart';
+import 'core/windows_save_discovery.dart';
+import 'widgets/binary_save_dialog.dart';
+import 'widgets/game_wide_search_dialog.dart';
+import 'widgets/onscreen_number_picker.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -32,7 +38,7 @@ extension WorkspaceInfo on Workspace {
     Workspace.preloads => 'Просмотр ресурсов и распознанных файлов',
     Workspace.saves => 'Редактирование доступных текстовых сейвов',
     Workspace.localize => 'Локализация без изменения ключей JSON',
-    Workspace.cheats => 'Память запущенной игры: модуль в разработке',
+    Workspace.cheats => 'Выбор чисел на экране и поиск в сейвах; live-память позже',
   };
   IconData get icon => switch (this) {
     Workspace.preloads => Icons.folder_zip_outlined,
@@ -84,6 +90,7 @@ class _GameLabHomeState extends State<GameLabHome> {
 
   Workspace _section = Workspace.preloads;
   String? _folder;
+  final List<String> _extraFolders = [];
   List<GameFile> _files = [];
   GameFile? _selected;
   Uint8List? _bytes;
@@ -136,11 +143,206 @@ class _GameLabHomeState extends State<GameLabHome> {
         return;
       }
       if (!mounted) return;
-      setState(() { _folder = folder; _selected = null; _bytes = null;
+      setState(() { _folder = folder; _extraFolders.clear();
+        _selected = null; _bytes = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
       await _scan();
     } catch (error) { _message('Не удалось открыть папку: $error'); }
+  }
+
+
+  Future<void> _addFolder() async {
+    if (_folder == null || _loading) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    if (_extraFolders.length >= 5) {
+      _message('Для одного поиска можно выбрать до 6 папок');
+      return;
+    }
+    try {
+      final folder = await _storage.chooseFolder();
+      if (folder == null) return;
+      if (folder == _folder || _extraFolders.contains(folder)) {
+        _message('Эта папка уже добавлена');
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _extraFolders.add(folder));
+      await _scan();
+    } catch (error) {
+      _message('Не удалось добавить папку: $error');
+    }
+  }
+
+
+  Future<void> _findWindowsSaveFolders() async {
+    final source = _folder;
+    if (!Platform.isWindows || source == null || _loading) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    if (_extraFolders.length >= 5) {
+      _message('Уже выбрано максимальное количество папок');
+      return;
+    }
+    setState(() => _loading = true);
+    List<String> matches;
+    try {
+      matches = await WindowsSaveDiscovery.discoverForGame(source);
+    } catch (error) {
+      _message('Не удалось найти папки сохранений: $error');
+      return;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    if (!mounted) return;
+    final additions = matches
+        .where((f) => f != source && !_extraFolders.contains(f))
+        .take(5 - _extraFolders.length)
+        .toList();
+    if (additions.isEmpty) {
+      _message('Папок с названием игры в стандартных местах не найдено. '
+          'Добавь папку вручную.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Найденные папки сохранений Windows'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Найдены каталоги, совпадающие с названием игры. '
+                'Подключить их к поиску? Другие приложения не сканируются.'),
+              const SizedBox(height: 10),
+              for (final path in additions) Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: SelectableText(path, style: const TextStyle(
+                  fontFamily: 'monospace', fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Добавить к поиску')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _extraFolders.addAll(additions));
+    await _scan();
+  }
+
+  Future<void> _chooseOnScreenNumber() async {
+    if (_folder == null) {
+      _message('Выбери папку игры: найденное число нужно будет искать в файлах');
+      return;
+    }
+    if (_dirty || _loading) {
+      _message('Сначала закончи текущую правку');
+      return;
+    }
+    final number = await showDialog<String>(
+      context: context,
+      builder: (_) => const OnScreenNumberPicker(),
+    );
+    if (!mounted || number == null) return;
+    await _showGameWideSearch(initialQuery: number);
+  }
+
+  Future<void> _showGameWideSearch({String? initialQuery}) async {
+    if (_folder == null || _loading) {
+      _message('Сначала выбери папку игры');
+      return;
+    }
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    final hit = await showDialog<GameValueHit>(
+      context: context,
+      builder: (_) => GameWideSearchDialog(
+        storage: _storage,
+        files: List<GameFile>.of(_files),
+        folderCount: 1 + _extraFolders.length,
+        initialQuery: initialQuery,
+      ),
+    );
+    if (!mounted || hit == null) return;
+    if (_section == Workspace.cheats) {
+      setState(() => _section = Workspace.saves);
+    }
+    await _openFile(hit.file);
+    if (!mounted || _selected?.id != hit.file.id) return;
+    if (hit.numericFormat != null && _bytes != null &&
+        _originalText == null && !_loading &&
+        GameValueSearch.matchesBinaryHit(hit, _bytes!)) {
+      await _editFoundBinaryNumber(hit);
+    }
+  }
+
+  Future<void> _editFoundBinaryNumber(GameValueHit hit) async {
+    final source = _bytes;
+    final format = hit.numericFormat;
+    if (source == null || format == null || _dirty) return;
+    final controller = TextEditingController(text: hit.matchedValue);
+    String? replacement;
+    try {
+      replacement = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Изменить найденное число?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(hit.file.relativePath,
+                style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 10),
+              Text('${hit.format} · ${hit.location} · '
+                'значение ${hit.matchedValue}'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true, decimal: true),
+                decoration: const InputDecoration(labelText: 'Новое число'),
+              ),
+              const SizedBox(height: 12),
+              const Text('Проверь, что это нужное поле HP/маны/валюты, '
+                  'а не случайное совпадение.',
+                style: TextStyle(fontSize: 12)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Отмена')),
+            FilledButton(onPressed: () =>
+                Navigator.pop(dialogContext, controller.text),
+              child: const Text('Проверить изменение')),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted || replacement == null) return;
+    await _applyBinaryPatch(hit.file, source,
+      NumericPatchRequest(
+        offset: hit.offset,
+        format: format,
+        expected: hit.matchedValue,
+        replacement: replacement,
+      ),
+    );
   }
 
   Future<void> _scan() async {
@@ -148,14 +350,40 @@ class _GameLabHomeState extends State<GameLabHome> {
     if (folder == null || _loading) return;
     setState(() { _loading = true; _state = 'Сканирование файлов…'; });
     try {
-      final found = await _storage.scan(folder);
+      final roots = [folder, ..._extraFolders];
+      final found = <GameFile>[];
+      final ids = <String>{};
+      final errors = <String>[];
+      for (var i = 0; i < roots.length; i++) {
+        try {
+          final batch = await _storage.scan(roots[i]);
+          for (final item in batch) {
+            if (!ids.add(item.id)) continue;
+            found.add(GameFile(
+              id: item.id, name: item.name, size: item.size,
+              relativePath: roots.length == 1
+                  ? item.relativePath
+                  : 'Папка ${i + 1}/${item.relativePath}',
+            ));
+          }
+        } catch (error) {
+          errors.add('Папка ${i + 1}: $error');
+        }
+      }
+      if (errors.length == roots.length) {
+        throw StateError('Ни одна папка не прочитана: ${errors.join('; ')}');
+      }
       found.sort((a, b) => a.relativePath.toLowerCase()
           .compareTo(b.relativePath.toLowerCase()));
       if (!mounted) return;
-      setState(() { _files = found; _profile = detectGameProfile(found); _selected = null; _bytes = null;
-        _originalText = null; _mobilePreview = false;
+      setState(() { _files = found; _profile = detectGameProfile(found);
+        _selected = null; _bytes = null; _originalText = null;
+        _mobilePreview = false;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
-        _state = 'Найдено ${found.length} файлов · движок: ${_profile?.engine ?? 'неизвестен'}'; });
+        _state = 'Найдено ${found.length} файлов из ${roots.length} папок'
+          ' · движок: ${_profile?.engine ?? 'неизвестен'}'
+          '${errors.isNotEmpty ? ' · ошибок папок: ${errors.length}' : ''}';
+      });
     } catch (error) { _message('Ошибка сканирования: $error'); }
     finally { if (mounted) setState(() => _loading = false); }
   }
@@ -266,6 +494,81 @@ class _GameLabHomeState extends State<GameLabHome> {
     return true;
   }
 
+
+  Future<void> _showBinarySaveEditor() async {
+    final file = _selected;
+    final original = _bytes;
+    if (_loading || file == null || original == null ||
+        file.size > maxEditableBytes) return;
+    final request = await showDialog<NumericPatchRequest>(
+      context: context,
+      builder: (_) => BinarySaveDialog(data: original),
+    );
+    if (!mounted || request == null) return;
+    await _applyBinaryPatch(file, original, request);
+  }
+
+  Future<void> _applyBinaryPatch(GameFile file, Uint8List original,
+      NumericPatchRequest request) async {
+    Uint8List patched;
+    try {
+      if (_selected?.id != file.id || !identical(_bytes, original)) {
+        throw StateError('Открытый файл изменился: повтори поиск');
+      }
+      patched = BinarySaveEditor.patch(original,
+        offset: request.offset,
+        expected: request.expected,
+        replacement: request.replacement,
+        format: request.format,
+      );
+      if (_bytesEqual(original, patched)) {
+        _message('Новое значение совпадает со старым — записывать нечего');
+        return;
+      }
+    } catch (error) {
+      _message('Не удалось подготовить правку: $error');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить бинарный сейв?'),
+        content: Text('Файл: ${file.relativePath}\n'
+          'Смещение: 0x${request.offset.toRadixString(16)}\n'
+          '${request.format.label}: ${request.expected} → ${request.replacement}\n\n'
+          'Сначала создадим резервную копию. '
+          'Если игра использует контрольную сумму или шифрование, '
+          'отредактированный сейв может не загрузиться. Закрой игру.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Создать копию и применить')),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    setState(() => _loading = true);
+    try {
+      final onDisk = await _storage.read(file);
+      if (!_bytesEqual(onDisk, original)) {
+        throw StateError('Сейв на диске изменился. Открой его заново.');
+      }
+      final backup = await _storage.writeWithBackup(file, patched);
+      final verify = await _storage.read(file);
+      if (!_bytesEqual(verify, patched)) {
+        throw StateError('Проверка записи не прошла. Бэкап: $backup');
+      }
+      if (!mounted) return;
+      setState(() { _bytes = patched; _state = 'Бинарный сейв обновлён'; });
+      _message('Записано и проверено. Бэкап: $backup');
+    } catch (error) {
+      _message('Не удалось применить правку: $error');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   Future<void> _showJsonFields() async {
     List<JsonField> fields;
     try {
@@ -313,7 +616,7 @@ class _GameLabHomeState extends State<GameLabHome> {
                   'число 120, строка "текст", true или false.',
                 style: TextStyle(fontSize: 11, color: _muted))),
           ]))),
-      ));
+      );
   }
 
   Future<bool> _editJsonField(JsonField field) async {
@@ -512,6 +815,16 @@ class _GameLabHomeState extends State<GameLabHome> {
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
           child: Text(_folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
+      if (_folder != null && (_section == Workspace.saves ||
+          _section == Workspace.cheats)) ...[
+        if (Platform.isWindows)
+          IconButton(onPressed: _loading ? null : _findWindowsSaveFolders,
+            tooltip: 'Найти папки сохранений Windows по названию игры',
+            icon: const Icon(Icons.travel_explore_outlined)),
+        IconButton(onPressed: _loading ? null : _addFolder,
+          tooltip: 'Добавить папку с сейвами (Windows / Android)',
+          icon: const Icon(Icons.create_new_folder_outlined)),
+      ],
       IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
       const SizedBox(width: 6),
@@ -544,6 +857,12 @@ class _GameLabHomeState extends State<GameLabHome> {
                   fontWeight: FontWeight.w800, letterSpacing: 1.3, fontSize: 12)),
               const Spacer(),
               Text('${items.length}', style: const TextStyle(color: _accent)),
+              if (_section == Workspace.saves)
+                IconButton(
+                  tooltip: 'Искать значение во всех выбранных папках',
+                  onPressed: _loading || _folder == null ? null : _showGameWideSearch,
+                  icon: const Icon(Icons.manage_search, color: _accent),
+                ),
             ]),
             const SizedBox(height: 13),
             TextField(controller: _query,
@@ -590,6 +909,8 @@ class _GameLabHomeState extends State<GameLabHome> {
           'Выбери файл', 'Два раза нажимать не обязательно — одного касания хватит.'));
     final imagePreview = _archive == null && file.isImage && file.size <= maxEditableBytes;
     final canEdit = _originalText != null && !file.isImage;
+    final canBinaryEdit = _section == Workspace.saves && !canEdit &&
+        _archive == null && !file.isImage && file.size <= maxEditableBytes;
     final canUseJsonEditor = canEdit &&
         (_section == Workspace.saves || _section == Workspace.localize) &&
         (file.isJson || _editor.text.trimLeft().startsWith('{') ||
@@ -614,6 +935,10 @@ class _GameLabHomeState extends State<GameLabHome> {
               tooltip: 'Редактировать поля JSON',
               onPressed: _showJsonFields,
               icon: const Icon(Icons.account_tree_outlined, color: _accent)),
+            if (canBinaryEdit) IconButton(
+              tooltip: 'Поиск чисел в бинарном сейве',
+              onPressed: _loading ? null : _showBinarySaveEditor,
+              icon: const Icon(Icons.manage_search, color: _accent)),
             if (_dirty) IconButton(
               tooltip: 'Отменить несохранённые правки',
               onPressed: () => _editor.text = _originalText ?? '',
@@ -635,7 +960,7 @@ class _GameLabHomeState extends State<GameLabHome> {
             ? Center(child: InteractiveViewer(
                 minScale: 0.5, maxScale: 5,
                 child: Image.memory(bytes, fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Text('Не удалось декодировать картинку'))))
+                  errorBuilder: (context, error, stackTrace) => const Text('Не удалось декодировать картинку'))))
             : canEdit
                 ? Padding(padding: const EdgeInsets.all(12),
                     child: TextField(controller: _editor,
@@ -650,9 +975,17 @@ class _GameLabHomeState extends State<GameLabHome> {
                 : SingleChildScrollView(padding: const EdgeInsets.all(20),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('HEX-ПРОСМОТР · только чтение',
+                        const Text('HEX-ПРОСМОТР',
                             style: TextStyle(color: _accent,
                                 fontWeight: FontWeight.w700, fontSize: 12)),
+                        if (canBinaryEdit) Padding(
+                          padding: const EdgeInsets.only(top: 12, bottom: 8),
+                          child: FilledButton.icon(
+                            onPressed: _loading ? null : _showBinarySaveEditor,
+                            icon: const Icon(Icons.manage_search),
+                            label: const Text('Найти и изменить число в сейве'),
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         const Text('Формат не распознан как обычный UTF-8. '
                             'Шифрование и упаковка зависят от конкретной игры.',
@@ -665,7 +998,9 @@ class _GameLabHomeState extends State<GameLabHome> {
             child: Align(alignment: Alignment.centerLeft,
               child: Text(canEdit
                   ? 'Редактирование локально · резервная копия при применении'
-                  : 'Просмотр без изменений исходного файла',
+                  : canBinaryEdit
+                    ? 'Числовые поля: поиск, выбор смещения, бэкап перед записью'
+                    : 'Просмотр без изменений исходного файла',
                   style: const TextStyle(fontSize: 11, color: _muted)))),
       ]),
     );
@@ -723,6 +1058,20 @@ class _GameLabHomeState extends State<GameLabHome> {
               'Защиту сетевых игр и античит обходить не будем.',
           style: const TextStyle(color: _muted, height: 1.5)),
         const SizedBox(height: 16),
+        FilledButton.icon(
+          onPressed: _loading || _folder == null
+              ? null : _chooseOnScreenNumber,
+          icon: const Icon(Icons.touch_app_outlined),
+          label: const Text('Нажать на число на экране'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: _loading || _folder == null
+              ? null : () => _showGameWideSearch(),
+          icon: const Icon(Icons.search),
+          label: const Text('Найти число или текст в файлах игры'),
+        ),
+        const SizedBox(height: 8),
         FilledButton.icon(onPressed: _loading || !Platform.isWindows ? null : _listProcesses,
             icon: const Icon(Icons.manage_search),
             label: const Text('Найти запущенные процессы (Windows)')),
@@ -747,7 +1096,7 @@ class _GameLabHomeState extends State<GameLabHome> {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.2.0', style: TextStyle(fontSize: 11, color: _muted)),
+      const Text('v0.3.3', style: TextStyle(fontSize: 11, color: _muted)),
     ]),
   );
 
@@ -785,7 +1134,7 @@ class _GameLabHomeState extends State<GameLabHome> {
                 maxLines: 2, style: const TextStyle(fontSize: 11, color: _accent))),
             Expanded(child: _isImageBytes(preview)
               ? InteractiveViewer(child: Image.memory(preview,
-                  errorBuilder: (_, _, _) => const Center(
+                  errorBuilder: (context, error, stackTrace) => const Center(
                     child: Text('Неизвестный формат изображения'))))
               : SingleChildScrollView(padding: const EdgeInsets.all(12),
                 child: SelectableText(decodeEditableText(preview) ??
