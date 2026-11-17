@@ -92,6 +92,11 @@ void main() {
 
   test('invalid tap coordinates or search radius never select a number', () {
     final tokens = ScreenNumberOcr.parseTsv(_tsv);
+    // Even a large radius must not accept a click outside the screenshot.
+    expect(ScreenNumberOcr.atPoint(tokens, -1, 60,
+      maxDistance: 1000), isNull);
+    expect(ScreenNumberOcr.atPoint(tokens, 120, -1,
+      maxDistance: 1000), isNull);
     expect(ScreenNumberOcr.atPoint(tokens, double.nan, 60), isNull);
     expect(ScreenNumberOcr.atPoint(tokens, 120, double.infinity), isNull);
     expect(ScreenNumberOcr.atPoint(tokens, 120, 60,
