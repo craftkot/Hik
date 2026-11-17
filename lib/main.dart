@@ -283,7 +283,8 @@ class _GameLabHomeState extends State<GameLabHome> {
     await _openFile(hit.file);
     if (!mounted || _selected?.id != hit.file.id) return;
     if (hit.numericFormat != null && _bytes != null &&
-        _originalText == null && !_loading) {
+        _originalText == null && !_loading &&
+        GameValueSearch.matchesBinaryHit(hit, _bytes!)) {
       await _editFoundBinaryNumber(hit);
     }
   }
