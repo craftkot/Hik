@@ -16,6 +16,8 @@ internal sealed class Request
     public string Replacement { get; set; } = "";
     public string Address { get; set; } = "";
     public string[] Addresses { get; set; } = Array.Empty<string>();
+    public string[] Baselines { get; set; } = Array.Empty<string>();
+    public string Mode { get; set; } = "changed";
     public long MaxBytes { get; set; } = 536870912; // 512 MiB, explicit bounded scan
     public int MaxResults { get; set; } = 3000;
     public int Alignment { get; set; } = 4;
@@ -53,6 +55,7 @@ internal static class Program
                 "list" => ListWindows(),
                 "scan" => Scan(request),
                 "refine" => Refine(request),
+                "compare" => Compare(request),
                 "write" => Write(request),
                 _ => throw new ArgumentException("Unknown command")
             };
@@ -200,6 +203,121 @@ internal static class Program
         return new { ok = true, addresses = matches, invalidated = errors, truncated = false };
     }
 
+    /// Compare only a previously found list of candidates. No second full
+    /// RAM scan is needed, and no addresses outside the selected list are read.
+    /// Every surviving candidate carries its new numeric baseline so further
+    /// comparisons work even when values diverge between addresses.
+    private static object Compare(Request request)
+    {
+        EnsurePid(request.Pid);
+        var addresses = request.Addresses
+            ?? throw new ArgumentException("Missing candidate list");
+        var baselines = request.Baselines
+            ?? throw new ArgumentException("Missing numeric baselines");
+        if (addresses.Length == 0 || addresses.Length > 5000 ||
+            addresses.Length != baselines.Length)
+            throw new ArgumentException("Expected 1..5000 addresses with matching baseline values");
+        if (request.Mode is not ("changed" or "unchanged" or "increased" or "decreased"))
+            throw new ArgumentException("Unsupported comparison mode");
+        var width = request.Format is "i32" or "f32" ? 4 :
+            request.Format is "i64" or "f64" ? 8 :
+            throw new ArgumentException("Unsupported number format");
+
+        var matches = new List<string>();
+        var values = new List<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int inaccessible = 0;
+        var handle = OpenProcess(QueryRead, false, (uint)request.Pid);
+        if (handle == IntPtr.Zero)
+            throw new InvalidOperationException("Game process is not readable");
+        try
+        {
+            for (int i = 0; i < addresses.Length; i++)
+            {
+                var item = addresses[i];
+                if (!visited.Add(item)) continue;
+                var address = ParseAddress(item);
+                var currentBytes = ReadExact(handle, address, width);
+                if (currentBytes == null) { inaccessible++; continue; }
+                if (MatchesComparison(request.Format, baselines[i], currentBytes,
+                    request.Mode, out var current))
+                {
+                    matches.Add(item);
+                    values.Add(current);
+                }
+            }
+        }
+        finally { CloseHandle(handle); }
+        return new {
+            ok = true, addresses = matches, values,
+            invalidated = inaccessible, truncated = false
+        };
+    }
+
+    private static bool MatchesComparison(
+        string format, string baseline, byte[] bytes,
+        string mode, out string current)
+    {
+        baseline = baseline.Replace(',', '.').Trim();
+        var culture = CultureInfo.InvariantCulture;
+        int order;
+        switch (format)
+        {
+            case "i32":
+                if (!int.TryParse(baseline, NumberStyles.Integer, culture, out var old32))
+                    throw new ArgumentException("Invalid Int32 baseline");
+                var value32 = BinaryPrimitives.ReadInt32LittleEndian(bytes);
+                order = value32.CompareTo(old32);
+                current = value32.ToString(culture);
+                break;
+            case "i64":
+                if (!long.TryParse(baseline, NumberStyles.Integer, culture, out var old64))
+                    throw new ArgumentException("Invalid Int64 baseline");
+                var value64 = BinaryPrimitives.ReadInt64LittleEndian(bytes);
+                order = value64.CompareTo(old64);
+                current = value64.ToString(culture);
+                break;
+            case "f32":
+                if (!float.TryParse(baseline, NumberStyles.Float, culture, out var oldFloat) ||
+                    !float.IsFinite(oldFloat))
+                    throw new ArgumentException("Invalid Float32 baseline");
+                var valueFloat = BitConverter.Int32BitsToSingle(
+                    BinaryPrimitives.ReadInt32LittleEndian(bytes));
+                if (!float.IsFinite(valueFloat))
+                {
+                    current = "";
+                    return false;
+                }
+                order = valueFloat.CompareTo(oldFloat);
+                current = valueFloat.ToString("R", culture);
+                break;
+            case "f64":
+                if (!double.TryParse(baseline, NumberStyles.Float, culture, out var oldDouble) ||
+                    !double.IsFinite(oldDouble))
+                    throw new ArgumentException("Invalid Float64 baseline");
+                var valueDouble = BitConverter.Int64BitsToDouble(
+                    BinaryPrimitives.ReadInt64LittleEndian(bytes));
+                if (!double.IsFinite(valueDouble))
+                {
+                    current = "";
+                    return false;
+                }
+                order = valueDouble.CompareTo(oldDouble);
+                current = valueDouble.ToString("R", culture);
+                break;
+            default:
+                throw new ArgumentException("Unsupported number format");
+        }
+        return mode switch
+        {
+            "changed" => order != 0,
+            "unchanged" => order == 0,
+            "increased" => order > 0,
+            "decreased" => order < 0,
+            _ => throw new ArgumentException("Unsupported comparison mode")
+        };
+    }
+
     private static object Write(Request request) => WriteInternal(request, allowSelf: false);
 
     private static object WriteInternal(Request request, bool allowSelf)
@@ -264,7 +382,23 @@ internal static class Program
             }, allowSelf: true);
             if (Marshal.ReadInt32(address) != 0x10203040)
                 throw new InvalidOperationException("Restore selftest failed");
-            return new { ok = true, selfTest = "read, guarded write, readback, restore" };
+            if (!MatchesComparison("i64", "9223372036854775806",
+                    Encode("i64", "9223372036854775807"),
+                    "increased", out var biggest) ||
+                biggest != "9223372036854775807")
+                throw new InvalidOperationException("Int64 comparison lost precision");
+            if (!MatchesComparison("f32", "12.5",
+                    Encode("f32", "10.5"), "decreased", out var f32) ||
+                f32 != "10.5")
+                throw new InvalidOperationException("Float32 decrease comparison failed");
+            if (!MatchesComparison("i32", "7331",
+                    Encode("i32", "7331"), "unchanged", out _))
+                throw new InvalidOperationException("Unchanged comparison failed");
+            if (MatchesComparison("i32", "7331",
+                    Encode("i32", "7331"), "changed", out _))
+                throw new InvalidOperationException("Changed comparison returned false positive");
+            return new { ok = true, selfTest =
+                "read, guarded write, readback, restore, relative comparison" };
         }
         finally { Marshal.FreeHGlobal(address); }
     }
