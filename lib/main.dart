@@ -76,13 +76,14 @@ class GameLabApp extends StatelessWidget {
 }
 
 class GameLabHome extends StatefulWidget {
-  const GameLabHome({super.key});
+  const GameLabHome({super.key, this.storage});
+  final GameStorage? storage;
   @override
   State<GameLabHome> createState() => _GameLabHomeState();
 }
 
 class _GameLabHomeState extends State<GameLabHome> {
-  final GameStorage _storage = createStorage();
+  late final GameStorage _storage = widget.storage ?? createStorage();
   final TextEditingController _editor = TextEditingController();
   final TextEditingController _query = TextEditingController();
   final TextEditingController _endpoint = TextEditingController();
@@ -280,8 +281,8 @@ class _GameLabHomeState extends State<GameLabHome> {
     if (_section == Workspace.cheats) {
       setState(() => _section = Workspace.saves);
     }
-    await _openFile(hit.file);
-    if (!mounted || _selected?.id != hit.file.id) return;
+    final opened = await _openFile(hit.file);
+    if (!mounted || !opened || _selected?.id != hit.file.id) return;
     if (hit.numericFormat != null && _bytes != null &&
         _originalText == null && !_loading &&
         GameValueSearch.matchesBinaryHit(hit, _bytes!)) {
@@ -401,7 +402,7 @@ class _GameLabHomeState extends State<GameLabHome> {
     }).toList();
   }
 
-  Future<void> _openFile(GameFile file) async {
+  Future<bool> _openFile(GameFile file) async {
     if (_dirty) {
       final abandon = await showDialog<bool>(context: context,
         builder: (context) => AlertDialog(
@@ -414,9 +415,24 @@ class _GameLabHomeState extends State<GameLabHome> {
                 child: const Text('Не сохранять')),
           ],
         ));
-      if (abandon != true) return;
+      if (abandon != true) return false;
     }
-    setState(() { _loading = true; _state = 'Чтение ${file.name}…'; });
+    if (!mounted) return false;
+    setState(() {
+      _loading = true;
+      _state = 'Чтение ${file.name}…';
+      // Invalidate previously opened bytes before the next read. A failure
+      // must not leave stale data or a stale write action in the editor.
+      _selected = null;
+      _bytes = null;
+      _archive = null;
+      _archiveEntry = null;
+      _archiveEntryBytes = null;
+      _originalText = null;
+      _editor.clear();
+      _dirty = false;
+      _mobilePreview = false;
+    });
     try {
       final isLarge = file.size > maxEditableBytes;
       final bytes = isLarge
@@ -425,7 +441,7 @@ class _GameLabHomeState extends State<GameLabHome> {
           ? ArchiveInspector.open(bytes) : null;
       final decoded = file.isImage || isLarge || inspector != null
           ? null : decodeEditableText(bytes);
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _selected = file;
         _bytes = bytes;
@@ -438,8 +454,13 @@ class _GameLabHomeState extends State<GameLabHome> {
         _mobilePreview = true;
         _state = 'Открыт ${file.relativePath}';
       });
-    } catch (error) { _message('Не удалось прочесть файл: $error'); }
-    finally { if (mounted) setState(() => _loading = false); }
+      return true;
+    } catch (error) {
+      _message('Не удалось прочесть файл: $error');
+      return false;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _applyChanges() async {
