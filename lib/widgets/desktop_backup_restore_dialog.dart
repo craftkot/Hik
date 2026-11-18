@@ -13,10 +13,14 @@ class DesktopBackupRestoreDialog extends StatefulWidget {
     super.key,
     required this.save,
     this.recovery,
+    this.inspectCrash,
   });
 
   final File save;
   final DesktopSaveRecovery? recovery;
+  /// Allows test environments to provide read-only crash inspection without
+  /// live filesystem asynchronous I/O inside a widget test's fake clock.
+  final Future<List<CrashRollbackPreview>> Function(File save)? inspectCrash;
 
   @override
   State<DesktopBackupRestoreDialog> createState() =>
@@ -52,7 +56,8 @@ class _DesktopBackupRestoreDialogState
     }
     try {
       final entries = await _recovery.listBackups(widget.save);
-      final interrupted = await CrashRollbackInspector.inspect(widget.save);
+      final interrupted = await (widget.inspectCrash ??
+          CrashRollbackInspector.inspect)(widget.save);
       if (!mounted) return;
       setState(() {
         _entries = entries;
