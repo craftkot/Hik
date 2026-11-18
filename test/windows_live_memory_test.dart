@@ -111,6 +111,26 @@ void main() {
     ), throwsFormatException);
   });
 
+  test('deep scan bounds CPU and memory before opening any process', () async {
+    final service = WindowsLiveMemoryService();
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int32,
+      budgetMiB: 513, bytewise: true,
+    ), throwsRangeError);
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int64,
+      budgetMiB: 2049,
+    ), throwsRangeError);
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int32,
+      maxResults: 5001,
+    ), throwsRangeError);
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int32,
+      maxResults: 0,
+    ), throwsRangeError);
+  });
+
   test('non-Windows helper refuses operation instead of process access',
       () async {
     final service = WindowsLiveMemoryService();
