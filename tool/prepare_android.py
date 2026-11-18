@@ -11,6 +11,16 @@ shutil.copyfile(root / 'android_native/OverlayService.kt', java / 'OverlayServic
 
 manifest = root / 'android/app/src/main/AndroidManifest.xml'
 content = manifest.read_text(encoding='utf-8')
+# Scoped package visibility: launcher-visible apps, not QUERY_ALL_PACKAGES.
+if '<queries>' not in content:
+    queries = """    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+"""
+    content = content.replace('<application', queries + '    <application', 1)
 for permission in (
     'android.permission.INTERNET',
     'android.permission.SYSTEM_ALERT_WINDOW',
