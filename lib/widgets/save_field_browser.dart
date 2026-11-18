@@ -80,9 +80,11 @@ class _SaveFieldBrowserState extends State<SaveFieldBrowser> {
     final categories = SaveValueCategory.values.where((category) =>
         category.important &&
         widget.fields.any((field) => field.category == category)).toList();
-    final filtered = filterSaveFields(widget.fields,
+    final matches = filterSaveFields(widget.fields,
       query: _search.text, category: _category,
       onlyImportant: widget.isSave && _onlyImportant);
+    // Search all inspected leaves; keep the rendered list bounded.
+    final filtered = matches.take(500).toList(growable: false);
     final importantCount = widget.fields
         .where((field) => field.category.important).length;
 
@@ -137,7 +139,7 @@ class _SaveFieldBrowserState extends State<SaveFieldBrowser> {
                   setState(() => _onlyImportant = enabled ?? false)),
             const Expanded(child: Text('Только важные',
                 style: TextStyle(fontSize: 12))),
-            Text('Показано: ${filtered.length}',
+            Text('Показано: ${filtered.length} из ${matches.length}',
                 style: const TextStyle(fontSize: 11, color: _muted)),
           ]),
         ),
@@ -159,6 +161,12 @@ class _SaveFieldBrowserState extends State<SaveFieldBrowser> {
             const SizedBox(width: 12),
           ])),
       ],
+      if (matches.length > 500)
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 4, 12, 5),
+          child: Text('Показаны первые 500 совпадений — уточни поиск.',
+              style: TextStyle(fontSize: 11, color: _muted)),
+        ),
       const Divider(height: 1),
       Expanded(child: filtered.isEmpty
           ? Center(child: Column(
