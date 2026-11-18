@@ -61,7 +61,8 @@ class _AndroidGameTranslationPanelState
       await widget.chooseGame();
       return;
     }
-    final candidates = GameLocaleCandidates.prioritized(widget.files);
+    final candidates = GameLocaleCandidates.prioritized(
+        widget.files, sourceLanguage: _sourceLanguage);
     if (candidates.isEmpty) {
       _notice('JSON-локализации не найдены. Нажми кнопку «Доступ к папке» '
           'и разреши чтение открытой папки игры.');
@@ -137,7 +138,8 @@ class _AndroidGameTranslationPanelState
         );
         final text = await translator.translateJson(source);
         return LocaleTextResult(text, translator.translated);
-      }, onProgress: (completed, total) {
+      }, sourceLanguage: _sourceLanguage,
+          onProgress: (completed, total) {
         if (mounted) setState(() =>
             _status = 'Готовим перевод: $completed/$total файлов');
       });
@@ -245,7 +247,8 @@ class _AndroidGameTranslationPanelState
 
   @override
   Widget build(BuildContext context) {
-    final candidates = GameLocaleCandidates.prioritized(widget.files);
+    final candidates = GameLocaleCandidates.prioritized(
+        widget.files, sourceLanguage: _sourceLanguage);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -295,7 +298,7 @@ class _AndroidGameTranslationPanelState
                   (value) => setState(() => _useOnDevice = value),
             ),
           ]),
-          if (_useOnDevice) Row(children: [
+          Row(children: [
             Expanded(child: DropdownButtonFormField<String>(
               initialValue: _sourceLanguage,
               isExpanded: true,
@@ -324,7 +327,8 @@ class _AndroidGameTranslationPanelState
                 if (value != null) setState(() => _language = value);
               },
             )),
-          ]) else ...[
+          ]),
+          if (!_useOnDevice) ...[
             TextField(
               controller: _endpoint,
               decoration: const InputDecoration(
@@ -333,28 +337,12 @@ class _AndroidGameTranslationPanelState
               ),
             ),
             const SizedBox(height: 7),
-            Row(children: [
-              Expanded(child: TextField(
-                controller: _apiKey,
-                obscureText: true,
-                decoration: const InputDecoration(
+            TextField(
+              controller: _apiKey,
+              obscureText: true,
+              decoration: const InputDecoration(
                   labelText: 'API-ключ (если нужен)'),
-              )),
-              const SizedBox(width: 8),
-              SizedBox(width: 115, child: DropdownButtonFormField<String>(
-                initialValue: _language,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Язык'),
-                items: const [
-                  DropdownMenuItem(value: 'ru', child: Text('RU')),
-                  DropdownMenuItem(value: 'en', child: Text('EN')),
-                  DropdownMenuItem(value: 'ja', child: Text('JA')),
-                ],
-                onChanged: _busy ? null : (value) {
-                  if (value != null) setState(() => _language = value);
-                },
-              )),
-            ]),
+            ),
           ],
           const SizedBox(height: 8),
           SizedBox(width: double.infinity, child: FilledButton.icon(
