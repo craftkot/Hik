@@ -18,6 +18,7 @@ enum LiveValueFormat {
 }
 
 enum LiveChangeMode {
+  snapshot('all', 'Обновить показания'),
   changed('changed', 'Изменилось'),
   unchanged('unchanged', 'Не изменилось'),
   increased('increased', 'Увеличилось'),
@@ -42,10 +43,13 @@ class LiveMemoryScan {
     required this.truncated,
     required this.regions,
     this.values = const [],
+    this.invalidated = 0,
   });
   final List<String> addresses;
   /// Snapshot of the current value for each address returned by relative scan.
   final List<String> values;
+  /// Candidates skipped because their memory is no longer readable.
+  final int invalidated;
   final int scannedBytes;
   final bool truncated;
   final int regions;
@@ -68,6 +72,7 @@ class LiveMemoryScan {
     return LiveMemoryScan(
       addresses: List<String>.unmodifiable(addresses.cast<String>()),
       values: List<String>.unmodifiable(values.cast<String>()),
+      invalidated: (json['invalidated'] as num?)?.toInt() ?? 0,
       scannedBytes: (json['scannedBytes'] as num?)?.toInt() ?? 0,
       truncated: json['truncated'] == true,
       regions: (json['regions'] as num?)?.toInt() ?? 0,
@@ -213,6 +218,11 @@ class WindowsLiveMemoryService {
     return LiveMemoryScan.fromJson(response);
   }
 
+  /// Read-only snapshot or relative refinement over existing addresses only.
+  /// In snapshot mode ("all") readable candidates are kept regardless of
+  /// their change and their latest numeric values are returned.
+  /// Does not write process memory.
+  ///
   /// Relative refinement across already-found addresses only.
   /// Every candidate needs its own previous numeric baseline to avoid
   /// treating unrelated RAM locations as one HP value.

@@ -57,7 +57,7 @@ void main() {
 
   test('relative refinement modes and value snapshots are validated', () {
     expect(LiveChangeMode.values.map((mode) => mode.code), [
-      'changed', 'unchanged', 'increased', 'decreased',
+      'all', 'changed', 'unchanged', 'increased', 'decreased',
     ]);
     final data = LiveMemoryScan.fromJson({
       'addresses': ['0x12345', '0x23456'],
@@ -65,6 +65,15 @@ void main() {
       'truncated': false,
     });
     expect(data.values, ['-12', '1.25E+12']);
+    expect(data.invalidated, 0);
+    final snapshot = LiveMemoryScan.fromJson({
+      'addresses': ['0x12345'],
+      'values': ['600'],
+      'invalidated': 2,
+    });
+    expect(snapshot.addresses, ['0x12345']);
+    expect(snapshot.values, ['600']);
+    expect(snapshot.invalidated, 2);
     expect(() => data.values.add('0'), throwsUnsupportedError);
     expect(() => LiveMemoryScan.fromJson({
       'addresses': ['0x12345'],

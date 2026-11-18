@@ -131,10 +131,11 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     finally { if (mounted) setState(() => _busy = false); }
   }
 
-  Future<void> _compare() async {
+  Future<void> _compare({LiveChangeMode? mode}) async {
     final game = _selected;
     final candidates = _result?.addresses ?? const <String>[];
     if (_busy || game == null || candidates.isEmpty) return;
+    final currentMode = mode ?? _changeMode;
     final baselines = <String>[];
     for (final address in candidates) {
       final baseline = _snapshots[address];
@@ -146,12 +147,14 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     }
     setState(() {
       _busy = true;
-      _status = 'Проверяю изменения по ${candidates.length} адресам…';
+      _status = currentMode == LiveChangeMode.snapshot
+          ? 'Читаю актуальные значения ${candidates.length} адресов…'
+          : 'Проверяю изменения по ${candidates.length} адресам…';
     });
     try {
       final result = await _service.compare(
         pid: game.pid, format: _format,
-        addresses: candidates, baselines: baselines, mode: _changeMode,
+        addresses: candidates, baselines: baselines, mode: currentMode,
       );
       if (!mounted || _selected?.pid != game.pid) return;
       setState(() {
@@ -161,9 +164,14 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
             result.addresses[i]: result.values[i],
         };
         _lastPatch = null;
-        _status = 'Фильтр «${_changeMode.label}»: осталось '
-            '${result.addresses.length} адресов. '
-            'После нового изменения в игре можно сравнить ещё раз.';
+        _status = currentMode == LiveChangeMode.snapshot
+            ? 'Показания обновлены: ${result.addresses.length} адресов. '
+              'Недоступных или нечисловых: '
+              '${candidates.length - result.addresses.length}. '
+              'Память игры не изменялась.'
+            : 'Фильтр «${currentMode.label}»: осталось '
+              '${result.addresses.length} адресов. '
+              'После нового изменения в игре можно сравнить ещё раз.';
       });
     } catch (error) { _notice(error); }
     finally { if (mounted) setState(() => _busy = false); }
@@ -358,6 +366,12 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                 onPressed: _busy || hits.isEmpty ? null : () => _search(true),
                 icon: const Icon(Icons.filter_alt_outlined),
                 label: const Text('Уточнить')),
+              OutlinedButton.icon(
+                onPressed: _busy || hits.isEmpty
+                    ? null
+                    : () => _compare(mode: LiveChangeMode.snapshot),
+                icon: const Icon(Icons.visibility_outlined),
+                label: const Text('Обновить показания')),
               if (_lastPatch != null)
                 OutlinedButton.icon(onPressed: _busy ? null : _undo,
                   icon: const Icon(Icons.undo),
@@ -379,7 +393,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                   },
                 )),
                 OutlinedButton.icon(
-                  onPressed: _busy || hits.isEmpty ? null : _compare,
+                  onPressed: _busy || hits.isEmpty
+                      ? null : () => _compare(),
                   icon: const Icon(Icons.compare_arrows),
                   label: const Text('Сравнить с прошлым значением')),
               ],
