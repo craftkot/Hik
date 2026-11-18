@@ -447,7 +447,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _extraFolders.addAll(additions);
       }
       _windowsFoundSaveRoots.addAll(additions);
-      _section = Workspace.saves;
+      // A discovery started in the translator must not switch tabs.
+      if (_section != Workspace.localize) _section = Workspace.saves;
     });
     await _scan();
   }
