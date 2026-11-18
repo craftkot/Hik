@@ -37,6 +37,12 @@ void main() {
     WindowsLiveMemoryService.validateValue('1e-44', LiveValueFormat.float32);
     WindowsLiveMemoryService.validateValue('1e-46', LiveValueFormat.float64);
     expect(() => WindowsLiveMemoryService.validateValue(
+        '1e-400', LiveValueFormat.float32), throwsFormatException);
+    expect(() => WindowsLiveMemoryService.validateValue(
+        '-1e-400', LiveValueFormat.float64), throwsFormatException);
+    WindowsLiveMemoryService.validateValue('-0.0', LiveValueFormat.float64);
+    WindowsLiveMemoryService.validateValue('0e-400', LiveValueFormat.float32);
+    expect(() => WindowsLiveMemoryService.validateValue(
         '', LiveValueFormat.int32), throwsFormatException);
     expect(() => WindowsLiveMemoryService.validateValue(
         '12.3', LiveValueFormat.int32), throwsFormatException);
