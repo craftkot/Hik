@@ -90,9 +90,8 @@ class GameValueSearch {
     // Recovery and backup artifacts are not live game saves. Never suggest
     // editing them as matches for a number picked from a screenshot.
     final name = file.name.toLowerCase();
-    if (name.contains('.ehtid-backup-') ||
-        name.contains('.ehtid-rollback-') ||
-        name.contains('.ehtid-stage-')) return false;
+    // Includes backup, pending, stage and interrupted rollback files.
+    if (name.contains('.ehtid-')) return false;
     if (file.size < 1 || file.size > maxEditableBytes) return false;
     return !const <String>{
       '.exe', '.dll', '.so', '.dylib', '.pdb', '.class', '.dex',
