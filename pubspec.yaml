@@ -1,7 +1,7 @@
 name: game_lab
 description: EHTID Game Lab - local single-player game files workspace.
 publish_to: none
-version: 0.4.8-alpha.1+16
+version: 0.4.9-alpha.1+17
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -12,6 +12,7 @@ dependencies:
   archive: ^4.7.1
   file_picker: ^10.3.3
   path: ^1.9.1
+  google_mlkit_translation: ^1.0.3
 
 dev_dependencies:
   flutter_test:

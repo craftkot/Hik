@@ -4,10 +4,13 @@ import 'dart:io';
 /// Only translates VALUES in a valid JSON locale dictionary, never its keys.
 /// Skips paths, identifiers and printf/format tokens that the game may require.
 class LocaleTranslator {
-  LocaleTranslator({required this.endpoint, required this.target,
-    this.apiKey = '', this.maxStrings = 100});
+  LocaleTranslator({this.endpoint, required this.target,
+    this.apiKey = '', this.maxStrings = 100, this.translateText});
 
-  final Uri endpoint;
+  /// Optional on-device translation function. When supplied, source text is
+  /// never sent to an external translation HTTP endpoint.
+  final Future<String> Function(String maskedText)? translateText;
+  final Uri? endpoint;
   final String target;
   final String apiKey;
   final int maxStrings;
@@ -55,7 +58,15 @@ class LocaleTranslator {
 
   bool _isNaturalText(String input) {
     if (input.trim().length < 2) return false;
-    if (!RegExp(r'[A-Za-zА-Яа-яЁё]').hasMatch(input)) return false;
+    // English, Cyrillic, Japanese Kana/Kanji, Chinese Han and Korean Hangul.
+    if (!RegExp(r'[A-Za-zА-Яа-яЁёぁ-ヿ㐀-鿿가-힣]')
+        .hasMatch(input)) return false;
+    // A second pass should continue after already translated RU values,
+    // rather than repeatedly re-sending the first 100 entries.
+    if (target == 'ru' &&
+        RegExp(r'[А-Яа-яЁё]').hasMatch(input) &&
+        !RegExp(r'[A-Za-zぁ-ヿ㐀-鿿가-힣]')
+            .hasMatch(input)) return false;
     if (RegExp(r'^(https?://|res://|[\\/]|#[0-9a-fA-F]{6,8}$)').hasMatch(input)) {
       return false;
     }
@@ -88,6 +99,11 @@ class LocaleTranslator {
   }
 
   Future<String> _send(String source) async {
+    if (translateText != null) return translateText!(source);
+    final endpoint = this.endpoint;
+    if (endpoint == null) {
+      throw StateError('Нужен сервер перевода или локальный движок');
+    }
     if (endpoint.scheme != 'https' && endpoint.host != 'localhost' &&
         endpoint.host != '127.0.0.1') {
       throw StateError('Используй HTTPS или локальный переводчик');

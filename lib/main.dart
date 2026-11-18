@@ -9,6 +9,7 @@ import 'core/android_app_save_discovery.dart';
 import 'core/archive_inspector.dart';
 import 'core/binary_save_editor.dart';
 import 'core/game_file.dart';
+import 'core/game_locale_workflow.dart';
 import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
@@ -22,6 +23,7 @@ import 'widgets/onscreen_number_picker.dart';
 import 'widgets/live_memory_panel.dart';
 import 'widgets/installed_app_picker.dart';
 import 'widgets/android_floating_panel.dart';
+import 'widgets/android_game_translation_panel.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 
@@ -193,15 +195,17 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _selectedApp = chosen;
         _folder = chosen.virtualFolder;
         _extraFolders.clear();
-        _section = Workspace.saves;
+        // Choosing a game from Translator must stay in Translator.
+        _section = _section == Workspace.localize
+            ? Workspace.localize : Workspace.saves;
         _selected = null; _bytes = null; _originalText = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
       });
       await _scan();
       if (mounted && _files.isEmpty) {
-        _message('Сейвы пока не найдены. Нажми значок папки, '
-            'чтобы один раз разрешить доступ к папке этой игры.');
+        _message('Файлов игры пока не нашли. Нажми значок папки, '
+            'чтобы один раз разрешить доступ к каталогу игры.');
       }
     } catch (error) {
       _message('Не удалось получить список приложений: $error');
@@ -498,7 +502,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       final inSection = switch (_section) {
         Workspace.preloads => f.isLikelyPreload || (!f.isSave && !f.isLocalization),
         Workspace.saves => _selectedApp != null || f.isSave,
-        Workspace.localize => f.isLocalization,
+        Workspace.localize => f.isLocalization ||
+            GameLocaleCandidates.canTranslate(f),
         Workspace.cheats => false,
       };
       return inSection && f.relativePath.toLowerCase().contains(search);
@@ -964,7 +969,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           child: Text(_selectedApp?.label ?? _folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
       if (_folder != null && (_section == Workspace.saves ||
-          _section == Workspace.cheats)) ...[
+          _section == Workspace.cheats || _section == Workspace.localize)) ...[
         if (Platform.isWindows)
           IconButton(onPressed: _loading ? null : _findWindowsSaveFolders,
             tooltip: 'Найти папки сохранений Windows по названию игры',
@@ -999,6 +1004,24 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   Widget _workspaceView(bool compact) {
     final narrow = compact || MediaQuery.sizeOf(context).width < 1000;
     if (narrow && _mobilePreview && _selected != null) return _detailView(narrow: true);
+    if (Platform.isAndroid && _section == Workspace.localize) {
+      return Column(children: [
+        Flexible(flex: 3, child: SingleChildScrollView(
+          child: AndroidGameTranslationPanel(
+            storage: _storage,
+            files: _files,
+            gameName: _selectedApp?.label,
+            chooseGame: _chooseInstalledApp,
+            grantFolder: _selectedApp == null
+                ? _chooseFolder : _grantAndroidGameFolder,
+            refreshFiles: _scan,
+            hasUnsavedChanges: _dirty,
+          ),
+        )),
+        const SizedBox(height: 8),
+        Expanded(flex: 2, child: _fileList()),
+      ]);
+    }
     if (narrow) return _fileList();
     return Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       SizedBox(width: 345, child: _fileList()),
@@ -1319,7 +1342,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.8 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.9 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 
