@@ -24,6 +24,7 @@ import 'widgets/live_memory_panel.dart';
 import 'widgets/installed_app_picker.dart';
 import 'widgets/android_floating_panel.dart';
 import 'widgets/android_game_translation_panel.dart';
+import 'widgets/android_all_files_access_banner.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 
@@ -866,6 +867,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           _sidebar(compact),
           Expanded(child: Column(children: [
             _header(compact),
+            if (Platform.isAndroid && _storage is AndroidGameStorage &&
+                _section != Workspace.cheats)
+              AndroidAllFilesAccessBanner(
+                storage: _storage as AndroidGameStorage),
             Expanded(child: Padding(
               padding: EdgeInsets.all(compact ? 10 : 20),
               child: _section == Workspace.cheats
