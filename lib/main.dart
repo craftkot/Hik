@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core/android_app_save_discovery.dart';
 import 'core/archive_inspector.dart';
 import 'core/binary_save_editor.dart';
 import 'core/game_file.dart';
@@ -19,6 +20,7 @@ import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
 import 'widgets/onscreen_number_picker.dart';
 import 'widgets/live_memory_panel.dart';
+import 'widgets/installed_app_picker.dart';
 import 'widgets/android_floating_panel.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
@@ -98,6 +100,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
 
   Workspace _section = Workspace.preloads;
   String? _folder;
+  InstalledGameApp? _selectedApp;
   String? _overlayNumber;
   final List<String> _extraFolders = [];
   List<GameFile> _files = [];
@@ -111,7 +114,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   bool _loading = false;
   bool _mobilePreview = false;
   String _language = 'ru';
-  String _state = 'Выбери папку игры, чтобы начать';
+  String _state = 'Выбери игру (Android) или папку, чтобы начать';
   GameProfile? _profile;
 
   @override
@@ -173,6 +176,38 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       content: Text(message), duration: const Duration(seconds: 4)));
   }
 
+  Future<void> _chooseInstalledApp() async {
+    if (!Platform.isAndroid || _loading ||
+        _storage is! AndroidGameStorage) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки перед сменой игры');
+      return;
+    }
+    try {
+      final apps = await (_storage as AndroidGameStorage).listInstalledApps();
+      if (!mounted) return;
+      final chosen = await showInstalledAppPicker(context, apps);
+      if (!mounted || chosen == null) return;
+      _query.clear();
+      setState(() {
+        _selectedApp = chosen;
+        _folder = chosen.virtualFolder;
+        _extraFolders.clear();
+        _section = Workspace.saves;
+        _selected = null; _bytes = null; _originalText = null;
+        _mobilePreview = false; _files = []; _profile = null;
+        _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
+      });
+      await _scan();
+      if (mounted && _files.isEmpty) {
+        _message('Не нашли доступные файлы игры. Android закрывает '
+            'приватные сейвы; попробуй ручной выбор разрешённой папки.');
+      }
+    } catch (error) {
+      _message('Не удалось получить список приложений: $error');
+    }
+  }
+
   Future<void> _chooseFolder() async {
     try {
       final folder = await _storage.chooseFolder();
@@ -182,7 +217,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         return;
       }
       if (!mounted) return;
-      setState(() { _folder = folder; _extraFolders.clear();
+      setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
         _selected = null; _bytes = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
@@ -419,9 +454,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _selected = null; _bytes = null; _originalText = null;
         _mobilePreview = false;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
-        _state = 'Найдено ${found.length} файлов из ${roots.length} папок'
-          ' · движок: ${_profile?.engine ?? 'неизвестен'}'
-          '${errors.isNotEmpty ? ' · ошибок папок: ${errors.length}' : ''}';
+        _state = _selectedApp != null
+            ? 'Игра: ${_selectedApp!.label} · кандидатов: ${found.length}'
+                ' (только в разрешённых каталогах)'
+            : 'Найдено ${found.length} файлов из ${roots.length} папок'
+                ' · движок: ${_profile?.engine ?? 'неизвестен'}'
+                '${errors.isNotEmpty ? ' · ошибок папок: ${errors.length}' : ''}';
       });
     } catch (error) { _message('Ошибка сканирования: $error'); }
     finally { if (mounted) setState(() => _loading = false); }
@@ -432,7 +470,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     final visible = _files.where((f) {
       final inSection = switch (_section) {
         Workspace.preloads => f.isLikelyPreload || (!f.isSave && !f.isLocalization),
-        Workspace.saves => f.isSave,
+        Workspace.saves => _selectedApp != null || f.isSave,
         Workspace.localize => f.isLocalization,
         Workspace.cheats => false,
       };
@@ -896,7 +934,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (_folder != null && !compact) Padding(
         padding: const EdgeInsets.only(right: 12),
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
-          child: Text(_folder!, overflow: TextOverflow.ellipsis,
+          child: Text(_selectedApp?.label ?? _folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
       if (_folder != null && (_section == Workspace.saves ||
           _section == Workspace.cheats)) ...[
@@ -904,16 +942,27 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           IconButton(onPressed: _loading ? null : _findWindowsSaveFolders,
             tooltip: 'Найти папки сохранений Windows по названию игры',
             icon: const Icon(Icons.travel_explore_outlined)),
-        IconButton(onPressed: _loading ? null : _addFolder,
-          tooltip: 'Добавить папку с сейвами (Windows / Android)',
-          icon: const Icon(Icons.create_new_folder_outlined)),
+        if (Platform.isWindows || (!compact && Platform.isAndroid))
+          IconButton(onPressed: _loading ? null : _addFolder,
+            tooltip: 'Добавить папку с сейвами',
+            icon: const Icon(Icons.create_new_folder_outlined)),
       ],
       IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
+      if (Platform.isAndroid)
+        IconButton(onPressed: _loading ? null : _chooseFolder,
+          tooltip: 'Вручную выбрать доступную папку (резервный вариант)',
+          icon: const Icon(Icons.folder_open_outlined)),
       const SizedBox(width: 6),
-      FilledButton.icon(onPressed: _loading ? null : _chooseFolder,
-          icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: Text(compact ? 'Папка' : 'Открыть папку игры')),
+      FilledButton.icon(
+          onPressed: _loading ? null :
+              (Platform.isAndroid ? _chooseInstalledApp : _chooseFolder),
+          icon: Icon(Platform.isAndroid
+              ? Icons.sports_esports_outlined : Icons.folder_open_outlined,
+              size: 18),
+          label: Text(Platform.isAndroid
+              ? (compact ? 'Игра' : 'Выбрать игру')
+              : (compact ? 'Папка' : 'Открыть папку игры'))),
     ]),
   );
 
@@ -955,11 +1004,19 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         ),
         const Divider(height: 1, color: Color(0xFF2D293C)),
         Expanded(child: _folder == null
-            ? _emptyMessage(Icons.folder_open, 'Папка ещё не выбрана',
-                'Открой папку игры — появятся доступные файлы.')
+            ? _emptyMessage(Icons.folder_open,
+                Platform.isAndroid ? 'Игра ещё не выбрана' : 'Папка ещё не выбрана',
+                Platform.isAndroid ? 'Нажми «Игра» в верхней панели.'
+                    : 'Открой папку игры — появятся доступные файлы.')
             : items.isEmpty
-              ? _emptyMessage(Icons.manage_search, 'Файлы не найдены',
-                  'Проверь путь или выбери другую функцию слева.')
+              ? _emptyMessage(Icons.manage_search,
+                  _selectedApp != null ? 'Доступных файлов игры не найдено'
+                      : 'Файлы не найдены',
+                  _selectedApp != null
+                      ? 'Проверены только ранее разрешённые папки. '
+                          'Приватные данные Android недоступны; для других '
+                          'файлов используй кнопку папки вверху.'
+                      : 'Проверь путь или выбери другую функцию слева.')
               : ListView.builder(itemCount: items.length,
                   itemBuilder: (context, index) {
                     final file = items[index];
@@ -1172,7 +1229,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     else AndroidFloatingPanel(
       initialNumber: _overlayNumber,
       onSearch: (number) async {
-        if (_folder == null) await _chooseFolder();
+        if (_folder == null) {
+          if (Platform.isAndroid) await _chooseInstalledApp();
+          else await _chooseFolder();
+        }
         if (!mounted || _folder == null) return;
         await _showGameWideSearch(initialQuery: number);
       },
@@ -1209,7 +1269,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         ]),
         if (_folder == null) const Padding(
           padding: EdgeInsets.only(top: 8),
-          child: Text('Сначала выбери папку игры в верхней панели.',
+          child: Text(Platform.isAndroid
+              ? 'Сначала выбери игру в верхней панели.'
+              : 'Сначала выбери папку игры в верхней панели.',
             style: TextStyle(color: _muted, fontSize: 11))),
       ]),
     ),
