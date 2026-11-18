@@ -29,6 +29,16 @@ void main() {
     expect(fields.map((field) => field.pointer), before);
   });
 
+  test('late fields remain searchable beyond the first 500 rows', () {
+    final many = <JsonField>[
+      for (var i = 0; i < 1300; i++) JsonField('/other_$i', i),
+      const JsonField('/player/mana', 75),
+    ];
+    final found = filterSaveFields(many, query: 'mana');
+    expect(found.single.pointer, '/player/mana');
+    expect(filterSaveFields(many), hasLength(1301));
+  });
+
   testWidgets('filters key stats by category and shows count',
       (tester) async {
     tester.view.physicalSize = const Size(1250, 900);
@@ -60,7 +70,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('/player/hp'), findsOneWidget);
     expect(find.text('/player/gold'), findsNothing);
-    expect(find.text('Показано: 1'), findsOneWidget);
+    expect(find.text('Показано: 1 из 1'), findsOneWidget);
 
     await tester.tap(find.text('/player/hp'));
     await tester.pumpAndSettle();
