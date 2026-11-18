@@ -68,7 +68,7 @@ void main() {
     expect(find.textContaining('строки будут переведены'), findsOneWidget);
     await tester.tap(find.text('Отмена'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(SwitchListTile));
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Подготовить перевод (1 файлов)'));
     await tester.pump();
