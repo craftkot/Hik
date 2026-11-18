@@ -55,7 +55,7 @@ void main() {
     expect(find.text('/player/strength'), findsOneWidget);
     // Category filter and the field badge both display this label.
     expect(find.text('Валюта'), findsNWidgets(2));
-    expect(find.text('HP / здоровье'), findsOneWidget);
+    expect(find.text('HP / здоровье'), findsNWidgets(2));
     final gold = tester.getTopLeft(find.text('/player/gold')).dy;
     final hp = tester.getTopLeft(find.text('/player/hp')).dy;
     final strength = tester.getTopLeft(find.text('/player/strength')).dy;
