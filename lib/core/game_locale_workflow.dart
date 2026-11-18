@@ -71,8 +71,27 @@ class GameLocaleCandidates {
             .hasMatch(name);
   }
 
-  static List<GameFile> prioritized(Iterable<GameFile> files) {
-    final candidates = files.where(canTranslate).toList();
+  /// Avoid translating every locale variant in a directory. A chosen source
+  /// language must not rewrite ru.json, ja.json, etc. A neutral strings.json
+  /// may be translated after the user checks the preview.
+  static bool matchesLanguage(GameFile file, String code) {
+    const known = {
+      'en', 'ru', 'ja', 'zh', 'ko', 'fr', 'de', 'es', 'it',
+      'pt', 'uk', 'pl', 'tr', 'nl', 'vi', 'th', 'ar',
+    };
+    final markers = file.relativePath.toLowerCase()
+        .split(RegExp(r'[/\\\\._-]+'))
+        .where(known.contains).toSet();
+    return markers.isEmpty || (markers.length == 1 &&
+        markers.contains(code));
+  }
+
+  static List<GameFile> prioritized(Iterable<GameFile> files,
+      {String? sourceLanguage}) {
+    final candidates = files.where((file) =>
+        canTranslate(file) &&
+        (sourceLanguage == null || matchesLanguage(file, sourceLanguage)))
+        .toList();
     int score(GameFile file) {
       final path = file.relativePath.toLowerCase();
       if (RegExp(r'(en[-_]?(us|gb)?|english)\.json$')
@@ -110,9 +129,11 @@ class GameLocaleWorkflow {
   Future<GameLocaleBatch> prepare(
     Iterable<GameFile> files,
     JsonLocaleTranslate translate, {
+    String? sourceLanguage,
     void Function(int completed, int total)? onProgress,
   }) async {
-    final candidates = GameLocaleCandidates.prioritized(files);
+    final candidates = GameLocaleCandidates.prioritized(
+        files, sourceLanguage: sourceLanguage);
     final selected = candidates.take(GameLocaleCandidates.maxBatchFiles).toList();
     final drafts = <GameLocaleDraft>[];
     final skipped = <String>[];
