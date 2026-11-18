@@ -59,6 +59,9 @@ class CrashRollbackInspector {
           FileSystemEntityType.file) {
         throw StateError('Аварийный файл не является обычным файлом: ${entity.path}');
       }
+      if (result.length >= maxCandidates) {
+        throw StateError('Слишком много аварийных файлов (максимум $maxCandidates)');
+      }
       final candidate = File(entity.path);
       if (await candidate.length() > SafeDesktopSaveWriter.maxLength) {
         throw StateError('Аварийный файл превышает лимит 8 МиБ: ${entity.path}');
@@ -66,9 +69,6 @@ class CrashRollbackInspector {
       final data = await candidate.readAsBytes();
       if (data.length > SafeDesktopSaveWriter.maxLength) {
         throw StateError('Аварийный файл превышает лимит 8 МиБ: ${entity.path}');
-      }
-      if (result.length >= maxCandidates) {
-        throw StateError('Слишком много аварийных файлов (максимум $maxCandidates)');
       }
       result.add(CrashRollbackPreview(
         path: candidate.path,
