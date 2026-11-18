@@ -297,65 +297,154 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
 
 
   Future<void> _findWindowsSaveFolders() async {
-    final source = _folder;
-    if (!Platform.isWindows || source == null || _loading) return;
+    if (!Platform.isWindows || _loading) return;
     if (_dirty) {
       _message('Сначала сохрани или отмени правки');
       return;
     }
-    if (_extraFolders.length >= 5) {
-      _message('Уже выбрано максимальное количество папок');
+    if (_folder != null && _extraFolders.length >= 5) {
+      _message('Уже подключены 6 папок. Удали лишние перед поиском.');
       return;
     }
-    setState(() => _loading = true);
+
+    final controller = TextEditingController(
+      text: _folder == null ? '' :
+          WindowsSaveDiscovery.suggestedGameNameFromPath(_folder!),
+    );
+    String? gameName;
+    try {
+      gameName = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Найти сейвы по названию игры'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Ищем только стандартные каталоги сохранений '
+                    'твоего профиля Windows, не весь диск. '
+                    'Можно начать даже без папки установленной игры.'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  maxLength: 90,
+                  decoration: const InputDecoration(
+                    labelText: 'Название игры',
+                    hintText: 'Например: Stardew Valley',
+                  ),
+                  onSubmitted: (value) =>
+                      Navigator.pop(dialogContext, value.trim()),
+                ),
+                const Text('AppData · LocalLow · Saved Games · Documents · '
+                    'OneDrive Documents',
+                    style: TextStyle(fontSize: 11, color: _muted)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Отмена')),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Искать сейвы'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted || gameName == null) return;
+    final normalized = WindowsSaveDiscovery.normalizedGameName(gameName);
+    if (normalized.length < 3) {
+      _message('Введи название игры не короче трёх символов');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _state = 'Ищем сохранения: $gameName…';
+    });
     List<String> matches;
     try {
-      matches = await WindowsSaveDiscovery.discoverForGame(source);
+      matches = await WindowsSaveDiscovery.discoverByName(gameName);
     } catch (error) {
-      _message('Не удалось найти папки сохранений: $error');
+      _message('Поиск папок сохранений не удался: $error');
       return;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
     if (!mounted) return;
+
+    String key(String path) => path.replaceAll('\\', '/').toLowerCase();
+    final existing = <String>{
+      if (_folder != null) key(_folder!),
+      for (final path in _extraFolders) key(path),
+    };
+    final freeSlots = _folder == null
+        ? 6 : 5 - _extraFolders.length;
     final additions = matches
-        .where((f) => f != source && !_extraFolders.contains(f))
-        .take(5 - _extraFolders.length)
-        .toList();
+        .where((path) => !existing.contains(key(path)))
+        .take(freeSlots).toList();
     if (additions.isEmpty) {
-      _message('Папок с названием игры в стандартных местах не найдено. '
-          'Добавь папку вручную.');
+      _message('Для «$gameName» новых папок сейвов не найдено. '
+          'Можно открыть папку вручную.');
       return;
     }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Найденные папки сохранений Windows'),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Найдены каталоги, совпадающие с названием игры. '
-                'Подключить их к поиску? Другие приложения не сканируются.'),
-              const SizedBox(height: 10),
-              for (final path in additions) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: SelectableText(path, style: const TextStyle(
-                  fontFamily: 'monospace', fontSize: 12)),
-              ),
-            ],
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 540, maxHeight: 380),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('«$gameName»: найдено ${additions.length} каталогов. '
+                    'Подключить их к редактору? Содержимое ещё не изменялось.'),
+                const SizedBox(height: 12),
+                for (final path in additions) Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: SelectableText(path, style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 12)),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Отмена')),
+              child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Добавить к поиску')),
+              child: const Text('Подключить папки')),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _extraFolders.addAll(additions));
+
+    setState(() {
+      if (_folder == null) {
+        _folder = additions.first;
+        _extraFolders.addAll(additions.skip(1));
+        _selected = null;
+        _bytes = null;
+        _originalText = null;
+        _archive = null;
+        _archiveEntry = null;
+        _archiveEntryBytes = null;
+        _profile = null;
+        _mobilePreview = false;
+        _query.clear();
+      } else {
+        _extraFolders.addAll(additions);
+      }
+      _section = Workspace.saves;
+    });
     await _scan();
   }
 
@@ -989,12 +1078,21 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
           child: Text(_selectedApp?.label ?? _folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
-      if (_folder != null && (_section == Workspace.saves ||
-          _section == Workspace.cheats || _section == Workspace.localize)) ...[
-        if (Platform.isWindows)
-          IconButton(onPressed: _loading ? null : _findWindowsSaveFolders,
-            tooltip: 'Найти папки сохранений Windows по названию игры',
-            icon: const Icon(Icons.travel_explore_outlined)),
+      if (Platform.isWindows &&
+          (_section == Workspace.saves || _section == Workspace.localize))
+        if (compact)
+          IconButton(
+            onPressed: _loading ? null : _findWindowsSaveFolders,
+            tooltip: 'Найти сейвы по названию игры',
+            icon: const Icon(Icons.travel_explore_outlined))
+        else
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _findWindowsSaveFolders,
+            icon: const Icon(Icons.travel_explore_outlined, size: 17),
+            label: const Text('Найти сейвы')),
+      if (_folder != null &&
+          (_section == Workspace.saves || _section == Workspace.cheats ||
+              _section == Workspace.localize)) ...[
         if (Platform.isWindows || (!compact && Platform.isAndroid))
           IconButton(onPressed: _loading ? null : _addFolder,
             tooltip: 'Добавить папку с сейвами',
