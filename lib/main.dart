@@ -1267,8 +1267,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             icon: const Icon(Icons.search),
             label: const Text('Поиск в файлах игры')),
         ]),
-        if (_folder == null) const Padding(
-          padding: EdgeInsets.only(top: 8),
+        if (_folder == null) Padding(
+          padding: const EdgeInsets.only(top: 8),
           child: Text(Platform.isAndroid
               ? 'Сначала выбери игру в верхней панели.'
               : 'Сначала выбери папку игры в верхней панели.',
