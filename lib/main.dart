@@ -1022,7 +1022,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           onPressed: _loading ? null : _chooseFolder,
           icon: const Icon(Icons.folder_open_outlined, size: 18),
           label: Text(compact ? 'Папка' : (Platform.isAndroid
-              ? 'Выбрать папку игры' : 'Открыть папку игры')),
+              ? 'Выбрать папку игры' : 'Открыть папку игры'))),
     ]),
   );
 
