@@ -19,6 +19,7 @@ import 'widgets/game_wide_search_dialog.dart';
 import 'widgets/onscreen_number_picker.dart';
 import 'widgets/live_memory_panel.dart';
 import 'widgets/android_floating_panel.dart';
+import 'widgets/desktop_backup_restore_dialog.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -552,6 +553,41 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   }
 
 
+  Future<void> _restoreOpenedSave() async {
+    final selected = _selected;
+    if (!Platform.isWindows || _loading || _dirty || selected == null ||
+        !selected.isSave) return;
+    final backupOfCurrent = await showDialog<String>(
+      context: context,
+      builder: (_) => DesktopBackupRestoreDialog(save: File(selected.id)),
+    );
+    if (!mounted || backupOfCurrent == null) return;
+
+    // Invalidate the in-memory preview and refresh from the real file.
+    // Never continue to display stale bytes after restoration.
+    setState(() {
+      _selected = null;
+      _bytes = null;
+      _originalText = null;
+      _archive = null;
+      _archiveEntry = null;
+      _archiveEntryBytes = null;
+      _mobilePreview = false;
+      _editor.clear();
+      _dirty = false;
+    });
+    await _scan();
+    if (!mounted) return;
+    final matches = _files.where((file) => file.id == selected.id);
+    if (matches.isNotEmpty) {
+      await _openFile(matches.first);
+    }
+    if (mounted) {
+      _message('Сейв восстановлен и перечитан. '
+          'Копия прежней версии: $backupOfCurrent');
+    }
+  }
+
   Future<void> _showBinarySaveEditor() async {
     final file = _selected;
     final original = _bytes;
@@ -976,6 +1012,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                     style: const TextStyle(fontWeight: FontWeight.w700)),
                   Text('${_formatSize(file.size)}  ·  ${_archive != null ? 'ZIP · ${_archive!.entries.length} элементов' : identifyFile(bytes)}',
                       style: const TextStyle(fontSize: 11, color: _muted))])),
+            if (Platform.isWindows && _section == Workspace.saves &&
+                file.isSave)
+              IconButton(
+                tooltip: 'Просмотреть и восстановить резервную копию',
+                onPressed: _loading || _dirty ? null : _restoreOpenedSave,
+                icon: const Icon(Icons.restore, color: _cyanAccent)),
             if (canUseJsonEditor) IconButton(
               tooltip: 'Редактировать поля JSON',
               onPressed: _showJsonFields,
