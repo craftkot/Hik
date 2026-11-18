@@ -12,6 +12,7 @@ import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/storage_service.dart';
+import 'core/save_value_priority.dart';
 import 'core/translation_service.dart';
 import 'core/windows_save_discovery.dart';
 import 'widgets/binary_save_dialog.dart';
@@ -427,7 +428,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
 
   List<GameFile> get _visibleFiles {
     final search = _query.text.trim().toLowerCase();
-    return _files.where((f) {
+    final visible = _files.where((f) {
       final inSection = switch (_section) {
         Workspace.preloads => f.isLikelyPreload || (!f.isSave && !f.isLocalization),
         Workspace.saves => f.isSave,
@@ -436,6 +437,16 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       };
       return inSection && f.relativePath.toLowerCase().contains(search);
     }).toList();
+    if (_section != Workspace.saves) return visible;
+    // Only the filename is known before opening; prioritize likely save
+    // files but don't claim their values are verified.
+    final positioned = visible.asMap().entries.toList();
+    positioned.sort((a, b) {
+      final rank = SaveValuePriority.fromName(a.value.name).priority
+          .compareTo(SaveValuePriority.fromName(b.value.name).priority);
+      return rank != 0 ? rank : a.key.compareTo(b.key);
+    });
+    return positioned.map((item) => item.value).toList();
   }
 
   Future<bool> _openFile(GameFile file) async {
@@ -666,7 +677,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   Future<void> _showJsonFields() async {
     List<JsonField> fields;
     try {
-      fields = listJsonFields(_editor.text);
+      final found = listJsonFields(_editor.text,
+          max: _section == Workspace.saves ? 2500 : 500);
+      fields = _section == Workspace.saves
+          ? prioritizeJsonFields(found, max: 500)
+          : found;
     } catch (error) {
       _message('Не удалось прочитать JSON: $error');
       return;
@@ -687,13 +702,43 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                   icon: const Icon(Icons.close)),
               ])),
             const Divider(height: 1),
+            if (_section == Workspace.saves) Padding(
+              padding: const EdgeInsets.fromLTRB(16, 9, 16, 4),
+              child: Row(children: [
+                const Icon(Icons.auto_awesome, size: 16, color: _accent),
+                const SizedBox(width: 7),
+                Expanded(child: Text(
+                  'Важные поля сначала: ${fields.where((field) => field.category.important).length} '
+                  'из ${fields.length}. Подсказки по названиям — проверь значения.',
+                  style: const TextStyle(fontSize: 11, color: _muted))),
+              ]),
+            ),
             Expanded(child: ListView.builder(itemCount: fields.length,
               itemBuilder: (context, i) {
                 final field = fields[i];
                 return ListTile(
-                  title: Text(field.pointer, maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+                  leading: field.category.important
+                      ? const Icon(Icons.star_rounded, size: 18, color: _accent)
+                      : null,
+                  title: Row(children: [
+                    Expanded(child: Text(field.pointer, maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontFamily: 'monospace', fontSize: 12,
+                        fontWeight: field.category.important
+                            ? FontWeight.w700 : FontWeight.w400))),
+                    if (field.category.important) Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _accent.withValues(alpha: .12),
+                          borderRadius: BorderRadius.circular(7)),
+                        child: Text(field.category.label,
+                          style: const TextStyle(fontSize: 10,
+                              color: _accent))),
+                    ),
+                  ]),
                   subtitle: Text(field.preview, maxLines: 1,
                     overflow: TextOverflow.ellipsis),
                   trailing: const Icon(Icons.edit_outlined, size: 18),
@@ -972,8 +1017,16 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                         subtitle: Text(file.relativePath, maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 10, color: _muted)),
-                        trailing: Text(_formatSize(file.size),
-                            style: const TextStyle(fontSize: 10, color: _muted)),
+                        trailing: Row(mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_section == Workspace.saves &&
+                                SaveValuePriority.fromName(file.name).important)
+                              const Tooltip(message: 'Важное по имени файла; содержимое не проверено',
+                                child: Icon(Icons.star_outline_rounded,
+                                    size: 16, color: _accent)),
+                            Text(_formatSize(file.size),
+                                style: const TextStyle(fontSize: 10, color: _muted)),
+                          ]),
                       ),
                     );
                   })),
@@ -1216,7 +1269,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.4 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.5 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 

@@ -93,6 +93,8 @@ class _GameWideSearchDialogState extends State<GameWideSearchDialog> {
   @override
   Widget build(BuildContext context) {
     final result = _results;
+    final ranked = result == null ? <GameValueHit>[]
+        : GameValueSearch.prioritizeHits(result.hits);
     return AlertDialog(
       title: const Text('Поиск по файлам игры'),
       content: SizedBox(
@@ -153,16 +155,35 @@ class _GameWideSearchDialogState extends State<GameWideSearchDialog> {
               const Text('Поиск остановлен. Результаты выше сохранены.',
                 style: TextStyle(fontSize: 11)),
             const SizedBox(height: 8),
-            Expanded(child: result == null || result.hits.isEmpty
+            if (ranked.any((hit) => hit.category.important)) Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Text(
+                'Похожие на HP, валюту и статы значения сверху. '
+                'Это подсказки по названиям ключей, не проверенные адреса.',
+                style: const TextStyle(fontSize: 11,
+                    color: Color(0xFFB68BFF))),
+            ),
+            Expanded(child: result == null || ranked.isEmpty
                 ? const Center(child: Text('Результатов пока нет'))
                 : ListView.builder(
-                  itemCount: result.hits.length,
+                  itemCount: ranked.length,
                   itemBuilder: (_, index) {
-                    final hit = result.hits[index];
+                    final hit = ranked[index];
                     return ListTile(
                       dense: true,
-                      title: Text(hit.file.relativePath, maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
+                      leading: hit.category.important
+                          ? const Icon(Icons.star_rounded,
+                              color: Color(0xFFB68BFF), size: 17)
+                          : null,
+                      title: Row(children: [
+                        Expanded(child: Text(hit.file.relativePath,
+                          maxLines: 2, overflow: TextOverflow.ellipsis)),
+                        if (hit.category.important) Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Text(hit.category.label,
+                            style: const TextStyle(fontSize: 10,
+                                color: Color(0xFFB68BFF)))),
+                      ]),
                       subtitle: Text(
                         '${hit.format} · ${hit.location}\n${hit.preview}',
                         maxLines: 3, overflow: TextOverflow.ellipsis,

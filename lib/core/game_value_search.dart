@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'binary_save_editor.dart';
 import 'game_file.dart';
+import 'save_value_priority.dart';
 import 'storage_service.dart';
 
 /// Searches accessible files selected by the user, never other processes or
@@ -16,6 +17,7 @@ class GameValueHit {
     required this.matchedValue,
     this.numericFormat,
     this.isText = false,
+    this.category = SaveValueCategory.other,
   });
 
   final GameFile file;
@@ -26,6 +28,8 @@ class GameValueHit {
   final String matchedValue;
   final SaveNumberFormat? numericFormat;
   final bool isText;
+  /// Naming heuristic, never proof of a game variable.
+  final SaveValueCategory category;
 
   String get location =>
       isText ? 'символ $offset' : '0x${offset.toRadixString(16)}';
@@ -51,6 +55,33 @@ class GameSearchSummary {
 
 class GameValueSearch {
   const GameValueSearch._();
+
+  /// Put named numeric fields first without changing order within a category.
+  static List<GameValueHit> prioritizeHits(List<GameValueHit> hits) {
+    final numbered = hits.asMap().entries.toList();
+    numbered.sort((a, b) {
+      final category = a.value.category.priority
+          .compareTo(b.value.category.priority);
+      return category != 0 ? category : a.key.compareTo(b.key);
+    });
+    return List<GameValueHit>.unmodifiable(
+        numbered.map((entry) => entry.value));
+  }
+
+  /// Only classify a number immediately following a named key assignment.
+  static SaveValueCategory _categoryForText(
+      String text, int offset, String value) {
+    if (num.tryParse(value) == null) return SaveValueCategory.other;
+    final prefix = text.substring(offset > 100 ? offset - 100 : 0, offset);
+    final json = RegExp(r'"([^"]{1,80})"\s*:\s*"?\s*$').firstMatch(prefix);
+    if (json != null) return SaveValuePriority.fromName(json.group(1)!);
+    final assignment = RegExp(
+        r'([A-Za-zА-Яа-яЁё_][A-Za-zА-Яа-яЁё_0-9]{0,80})\s*[:=]\s*"?\s*$')
+        .firstMatch(prefix);
+    return assignment == null
+        ? SaveValueCategory.other
+        : SaveValuePriority.fromName(assignment.group(1)!);
+  }
 
   /// Skip executable/media/archive payloads by default. Include unknown
   /// extensions, save blobs, JSON, ini, sqlite, XML, and extensionless files.
@@ -176,7 +207,8 @@ class GameValueSearch {
                 .replaceAll(RegExp(r'[\r\n\t]+'), ' ');
             hits.add(GameValueHit(file: file, offset: offset,
               format: 'UTF-8', preview: preview, matchedValue: value,
-              isText: true));
+              isText: true,
+              category: _categoryForText(text, offset, value)));
             inFile++;
           }
         } else {

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'save_value_priority.dart';
+
 /// Represents a leaf value in a JSON tree. Paths use JSON Pointer (RFC 6901).
 class JsonField {
   const JsonField(this.pointer, this.value);
@@ -7,6 +9,22 @@ class JsonField {
   final Object? value;
 
   String get preview => jsonEncode(value);
+
+  SaveValueCategory get category => SaveValuePriority.fromPath(pointer, value);
+}
+
+/// Sort key player values ahead of generic JSON without touching the file.
+/// Ties preserve their original document order; nonnumeric fields stay below.
+List<JsonField> prioritizeJsonFields(List<JsonField> fields, {int max = 500}) {
+  if (max < 0) throw RangeError.value(max, 'max');
+  final indexed = fields.asMap().entries.toList();
+  indexed.sort((a, b) {
+    final priority = a.value.category.priority
+        .compareTo(b.value.category.priority);
+    return priority != 0 ? priority : a.key.compareTo(b.key);
+  });
+  return List<JsonField>.unmodifiable(
+      indexed.take(max).map((entry) => entry.value));
 }
 
 String _escapeSegment(String value) =>
