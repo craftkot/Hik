@@ -93,4 +93,30 @@ void main() {
         data('old'));
   });
 
+  test('rejects aggregate preview memory over 32 MiB without modifying files', () async {
+    final payload = Uint8List(7 * 1024 * 1024);
+    for (var i = 0; i < 5; i++) {
+      await File('${save.path}.ehtid-rollback-$i.tmp')
+          .writeAsBytes(payload, flush: true);
+    }
+    await expectLater(CrashRollbackInspector.inspect(save), throwsStateError);
+    expect(await save.readAsBytes(), data('new'));
+    for (var i = 0; i < 5; i++) {
+      expect(await File('${save.path}.ehtid-rollback-$i.tmp').length(),
+          payload.length);
+    }
+  });
+
+  test('allows aggregate previews within memory budget', () async {
+    final payload = Uint8List(7 * 1024 * 1024);
+    for (var i = 0; i < 4; i++) {
+      await File('${save.path}.ehtid-rollback-$i.tmp')
+          .writeAsBytes(payload);
+    }
+    final previews = await CrashRollbackInspector.inspect(save);
+    expect(previews, hasLength(4));
+    expect(previews.every((p) => p.bytes.length == payload.length), isTrue);
+    expect(await save.readAsBytes(), data('new'));
+  });
+
 }

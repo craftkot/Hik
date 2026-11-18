@@ -30,6 +30,8 @@ class CrashRollbackPreview {
 class CrashRollbackInspector {
   /// Avoid retaining an unbounded number of 8 MiB snapshots in memory.
   static const int maxCandidates = 32;
+  /// Limit the combined retained rollback and per-preview current snapshots.
+  static const int maxPreviewBytes = 32 * 1024 * 1024;
 
   /// Returns previews only for regular, bounded rollback files belonging
   /// to [save]. Symlinks and oversized files are rejected, not followed.
@@ -52,6 +54,7 @@ class CrashRollbackInspector {
       }
     }
     final result = <CrashRollbackPreview>[];
+    var retainedBytes = 0;
     await for (final entity in save.parent.list(followLinks: false)) {
       final name = entity.uri.pathSegments.last;
       if (!name.startsWith(prefix) || !name.endsWith('.tmp')) continue;
@@ -66,10 +69,20 @@ class CrashRollbackInspector {
       if (await candidate.length() > SafeDesktopSaveWriter.maxLength) {
         throw StateError('Аварийный файл превышает лимит 8 МиБ: ${entity.path}');
       }
+      final candidateLength = await candidate.length();
+      final requiredBytes = candidateLength + (current?.length ?? 0);
+      if (requiredBytes > maxPreviewBytes - retainedBytes) {
+        throw StateError('Аварийные файлы превышают общий лимит предпросмотра 32 МиБ');
+      }
       final data = await candidate.readAsBytes();
       if (data.length > SafeDesktopSaveWriter.maxLength) {
         throw StateError('Аварийный файл превышает лимит 8 МиБ: ${entity.path}');
       }
+      if (data.length + (current?.length ?? 0) >
+          maxPreviewBytes - retainedBytes) {
+        throw StateError('Аварийные файлы превышают общий лимит предпросмотра 32 МиБ');
+      }
+      retainedBytes += data.length + (current?.length ?? 0);
       result.add(CrashRollbackPreview(
         path: candidate.path,
         bytes: data,
