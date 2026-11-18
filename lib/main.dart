@@ -313,13 +313,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       return;
     }
 
-    final controller = TextEditingController(
-      text: _folder == null ? '' :
-          WindowsSaveDiscovery.suggestedGameNameFromPath(_folder!),
-    );
-    String? gameName;
-    try {
-      gameName = await showDialog<String>(
+    // Let TextFormField own and dispose its controller with the dialog.
+    // Disposing a manually created controller immediately after pop()
+    // can race the dialog's reverse animation on Windows.
+    var typedName = _folder == null ? '' :
+        WindowsSaveDiscovery.suggestedGameNameFromPath(_folder!);
+    final gameName = await showDialog<String>(
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: const Text('Найти сейвы по названию игры'),
@@ -332,15 +331,16 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                     'твоего профиля Windows, не весь диск. '
                     'Можно начать даже без папки установленной игры.'),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
+                TextFormField(
+                  initialValue: typedName,
                   autofocus: true,
                   maxLength: 90,
                   decoration: const InputDecoration(
                     labelText: 'Название игры',
                     hintText: 'Например: Stardew Valley',
                   ),
-                  onSubmitted: (value) =>
+                  onChanged: (value) => typedName = value,
+                  onFieldSubmitted: (value) =>
                       Navigator.pop(dialogContext, value.trim()),
                 ),
                 const Text('AppData · LocalLow · Saved Games · Documents · '
@@ -354,15 +354,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 child: const Text('Отмена')),
             FilledButton(
               onPressed: () =>
-                  Navigator.pop(dialogContext, controller.text.trim()),
+                  Navigator.pop(dialogContext, typedName.trim()),
               child: const Text('Искать сейвы'),
             ),
           ],
         ),
       );
-    } finally {
-      controller.dispose();
-    }
     if (!mounted || gameName == null) return;
     final normalized = WindowsSaveDiscovery.normalizedGameName(gameName);
     if (normalized.length < 3) {
@@ -1097,7 +1094,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             style: const TextStyle(color: _muted, fontSize: 12))))),
       if (Platform.isWindows &&
           (_section == Workspace.saves || _section == Workspace.localize))
-        if (compact)
+        if (compact || _folder != null)
           IconButton(
             onPressed: _loading ? null : _findWindowsSaveFolders,
             tooltip: 'Найти сейвы по названию игры',
