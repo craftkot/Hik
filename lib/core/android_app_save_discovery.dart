@@ -56,18 +56,39 @@ class AndroidAppSaveDiscovery {
         .hasMatch(lower)) {
       return true;
     }
-    final normalizedPath = _normalize(lower);
-    final normalizedLabel = _normalize(app.label.toLowerCase());
-    if (normalizedLabel.length >= 5 &&
-        normalizedPath.contains(normalizedLabel)) {
-      return true;
+    final words = app.label.toLowerCase()
+        .split(RegExp(r'[^a-zа-яё0-9]+'))
+        .where((part) => part.isNotEmpty).toList();
+    final names = <String>{};
+    final full = _normalize(app.label.toLowerCase());
+    if (full.length >= 5) names.add(full);
+    for (var i = 0; i < words.length; i++) {
+      final word = words[i];
+      if (word.length >= 6 && !const {
+        'android', 'mobile', 'online', 'edition', 'games',
+        'launcher', 'official',
+      }.contains(word)) names.add(word);
+      if (i + 1 < words.length) {
+        final pair = _normalize(word + words[i + 1]);
+        if (pair.length >= 6) names.add(pair);
+      }
     }
-    final meaningful = app.label.toLowerCase().split(RegExp(r'[^a-zа-яё0-9]+'))
-        .where((part) => part.length >= 6 && !const {
-          'android', 'mobile', 'online', 'edition', 'games',
-          'launcher', 'official',
-        }.contains(part));
-    return meaningful.any((part) => normalizedPath.contains(_normalize(part)));
+    // Check individual directory/file segments. Substring-matching the whole
+    // path would incorrectly associate com.foo.game.beta with com.foo.game.
+    for (final segment in lower.split('/')) {
+      final normalized = _normalize(segment);
+      for (final name in names) {
+        if (normalized == name) return true;
+        if (normalized.startsWith(name) && const [
+          'save', 'saves', 'data', 'files', 'profile', 'profiles',
+          'slot', 'slots', 'game', 'games',
+        ].any((suffix) => normalized.substring(name.length)
+            .startsWith(suffix))) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   static String _normalize(String input) =>
