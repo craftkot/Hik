@@ -516,7 +516,9 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               SizedBox(width: 70, child: Text('$_budgetMiB МиБ',
                 style: const TextStyle(fontSize: 11))),
             ]),
-            SwitchListTile(
+            Material(
+              color: Colors.transparent,
+              child: SwitchListTile(
               key: const Key('bytewise-ram-scan-toggle'),
               contentPadding: EdgeInsets.zero,
               dense: true,
@@ -539,6 +541,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                       'Для первого сканирования ограничение 512 МиБ.'
                     : 'Обычный поиск: быстрее, выравнивание по размеру числа.';
               }),
+              ),
             ),
             Wrap(spacing: 8, runSpacing: 8, children: [
               FilledButton.icon(
