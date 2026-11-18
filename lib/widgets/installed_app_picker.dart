@@ -5,21 +5,37 @@ import '../core/android_app_save_discovery.dart';
 /// An in-app picker of launcher-visible packages. Selecting an app does not
 /// grant Android filesystem access to its private files.
 Future<InstalledGameApp?> showInstalledAppPicker(
-    BuildContext context, List<InstalledGameApp> apps) {
-  return showModalBottomSheet<InstalledGameApp>(
+    BuildContext context, List<InstalledGameApp> apps, {
+    Future<void> Function()? onChooseFolder,
+  }) async {
+  var manual = false;
+  final selected = await showModalBottomSheet<InstalledGameApp>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: const Color(0xFF181625),
     showDragHandle: true,
-    builder: (_) => InstalledAppPicker(apps: apps),
+    builder: (_) => InstalledAppPicker(
+      apps: apps,
+      onManualFolder: () {
+        manual = true;
+        Navigator.of(context).pop();
+      },
+    ),
   );
+  if (manual) {
+    await onChooseFolder?.call();
+    return null;
+  }
+  return selected;
 }
 
 class InstalledAppPicker extends StatefulWidget {
-  const InstalledAppPicker({super.key, required this.apps});
+  const InstalledAppPicker({super.key, required this.apps,
+    this.onManualFolder});
 
   final List<InstalledGameApp> apps;
+  final VoidCallback? onManualFolder;
 
   @override
   State<InstalledAppPicker> createState() => _InstalledAppPickerState();
@@ -56,6 +72,13 @@ class _InstalledAppPickerState extends State<InstalledAppPicker> {
             ),
           ),
           const SizedBox(height: 10),
+          if (widget.onManualFolder != null)
+            SizedBox(width: double.infinity, child: OutlinedButton.icon(
+              onPressed: widget.onManualFolder,
+              icon: const Icon(Icons.folder_open_outlined),
+              label: const Text('Нет игры? Выбрать папку вручную'),
+            )),
+          const SizedBox(height: 6),
           Expanded(child: visible.isEmpty
               ? const Center(child: Text('Приложение не найдено'))
               : ListView.builder(

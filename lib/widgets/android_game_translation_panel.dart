@@ -14,6 +14,7 @@ class AndroidGameTranslationPanel extends StatefulWidget {
     required this.storage,
     required this.files,
     required this.gameName,
+    this.hasFolder = false,
     required this.chooseGame,
     required this.grantFolder,
     required this.refreshFiles,
@@ -23,6 +24,8 @@ class AndroidGameTranslationPanel extends StatefulWidget {
   final GameStorage storage;
   final List<GameFile> files;
   final String? gameName;
+  /// True when the user chose a SAF folder without any installed-app match.
+  final bool hasFolder;
   final Future<void> Function() chooseGame;
   final Future<void> Function() grantFolder;
   final Future<void> Function() refreshFiles;
@@ -63,8 +66,8 @@ class _AndroidGameTranslationPanelState
       _notice('Сначала сохрани или отмени несохранённые изменения');
       return;
     }
-    if (widget.gameName == null) {
-      await widget.chooseGame();
+    if (widget.gameName == null && !widget.hasFolder) {
+      await widget.grantFolder();
       return;
     }
     final candidates = GameLocaleCandidates.prioritized(
@@ -275,17 +278,20 @@ class _AndroidGameTranslationPanelState
               color: Color(0xFF5EE9F5), fontSize: 11)),
           ]),
           const SizedBox(height: 7),
-          Text(widget.gameName == null
-              ? 'Выбери установленную игру. Откроются доступные переводы.'
-              : 'Игра: ${widget.gameName}. Переводим только доступные '
-                  'JSON-локализации; приватные данные Android закрыты.',
+          Text(widget.gameName != null
+              ? 'Игра: ${widget.gameName}. Ищем доступные JSON-локализации.'
+              : widget.hasFolder
+                  ? 'Ручной режим: папка открыта. Переводим найденные '
+                      'JSON-локализации без выбора игры в списке.'
+                  : 'Выбери папку игры; список установленных игр необязателен.',
             style: const TextStyle(fontSize: 11, color: Color(0xFFAAA5BE))),
           const SizedBox(height: 8),
-          if (widget.gameName != null)
+          if (widget.gameName != null || widget.hasFolder)
             Align(alignment: Alignment.centerLeft, child: TextButton.icon(
               onPressed: _busy ? null : widget.grantFolder,
               icon: const Icon(Icons.create_new_folder_outlined, size: 18),
-              label: const Text('Доступ к папке игры'),
+              label: Text(widget.gameName == null
+                  ? 'Изменить папку игры' : 'Доступ к папке игры'),
             )),
           Row(children: [
             const Expanded(child: Column(
@@ -355,7 +361,8 @@ class _AndroidGameTranslationPanelState
             onPressed: _busy ? null : _prepare,
             icon: const Icon(Icons.auto_fix_high),
             label: Text(_busy ? 'Обрабатываем…' :
-              widget.gameName == null ? 'Выбрать игру' :
+              !widget.hasFolder && widget.gameName == null
+                  ? 'Выбрать папку игры' :
               'Подготовить перевод (${candidates.length > 6
                   ? 6 : candidates.length} файлов)'),
           )),
