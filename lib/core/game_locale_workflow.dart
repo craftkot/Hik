@@ -137,8 +137,10 @@ class GameLocaleWorkflow {
         }
         final result = await translate(text);
         final parsed = jsonDecode(result.text);
-        if (parsed is! Map && parsed is! List) {
-          throw const FormatException('Некорректный JSON перевода');
+        if (parsed is! Map && parsed is! List ||
+            !_preservesJsonStructure(document, parsed)) {
+          throw const FormatException(
+            'Перевод изменил JSON-ключи, типы или значения данных');
         }
         if (result.translatedStrings <= 0 || result.text == text) {
           skipped.add('${file.name}: переводимых строк нет');
@@ -198,6 +200,28 @@ class GameLocaleWorkflow {
       }
     }
     return GameLocaleWriteReport(written: written, failed: failed);
+  }
+
+  /// A translated locale may change only string values. Keys, array
+  /// sizes, numbers, booleans and nulls must remain exactly the same.
+  bool _preservesJsonStructure(dynamic before, dynamic after) {
+    if (before is Map) {
+      if (after is! Map || before.length != after.length) return false;
+      for (final key in before.keys) {
+        if (!after.containsKey(key) ||
+            !_preservesJsonStructure(before[key], after[key])) return false;
+      }
+      return true;
+    }
+    if (before is List) {
+      if (after is! List || before.length != after.length) return false;
+      for (var i = 0; i < before.length; i++) {
+        if (!_preservesJsonStructure(before[i], after[i])) return false;
+      }
+      return true;
+    }
+    if (before is String) return after is String;
+    return before == after;
   }
 
   bool _sameBytes(Uint8List a, Uint8List b) {
