@@ -195,7 +195,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         await _chooseFolder();
         return;
       }
-      final chosen = await showInstalledAppPicker(context, apps);
+      final chosen = await showInstalledAppPicker(context, apps,
+          onChooseFolder: _chooseFolder);
       if (!mounted || chosen == null) return;
       _query.clear();
       setState(() {
