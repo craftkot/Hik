@@ -1015,6 +1015,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             grantFolder: _selectedApp == null
                 ? _chooseFolder : _grantAndroidGameFolder,
             refreshFiles: _scan,
+            hasUnsavedChanges: _dirty,
           ),
         )),
         const SizedBox(height: 8),
