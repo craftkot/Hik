@@ -681,7 +681,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       final found = listJsonFields(_editor.text,
           max: _section == Workspace.saves ? 2500 : 500);
       fields = _section == Workspace.saves
-          ? prioritizeJsonFields(found, max: 500)
+          ? prioritizeJsonFields(found, max: 2500)
           : found;
     } catch (error) {
       _message('Не удалось прочитать JSON: $error');
