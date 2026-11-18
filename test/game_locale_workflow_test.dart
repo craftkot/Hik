@@ -68,6 +68,30 @@ void main() {
         relativePath: 'game/backup/strings.json', size: 20)), isFalse);
   });
 
+  test('respects selected source language; does not rewrite other locales',
+      () {
+    const english = GameFile(id: 'en', name: 'en.json',
+        relativePath: 'assets/lang/en_US.json', size: 40);
+    const russian = GameFile(id: 'ru', name: 'ru.json',
+        relativePath: 'assets/lang/ru_RU.json', size: 40);
+    const japanese = GameFile(id: 'ja', name: 'ja.json',
+        relativePath: 'assets/lang/ja_JP.json', size: 40);
+    const neutral = GameFile(id: 'neutral', name: 'strings.json',
+        relativePath: 'assets/i18n/strings.json', size: 40);
+    expect(
+      GameLocaleCandidates.prioritized(
+        [english, russian, japanese, neutral], sourceLanguage: 'en',
+      ).map((file) => file.id).toSet(),
+      {'en', 'neutral'},
+    );
+    expect(
+      GameLocaleCandidates.prioritized(
+        [english, russian, japanese, neutral], sourceLanguage: 'ja',
+      ).map((file) => file.id).toSet(),
+      {'ja', 'neutral'},
+    );
+  });
+
   test('prepare only reads; apply verifies originals and saves backups',
       () async {
     final original = Uint8List.fromList(utf8.encode('{"hello":"Hello"}'));
