@@ -23,12 +23,40 @@ abstract class GameStorage {
 GameStorage createStorage() => Platform.isAndroid
     ? AndroidGameStorage() : DesktopGameStorage();
 
+class AndroidAllFilesAccessStatus {
+  const AndroidAllFilesAccessStatus({
+    required this.supported,
+    required this.granted,
+    required this.sdk,
+  });
+
+  final bool supported;
+  final bool granted;
+  final int sdk;
+}
+
 class AndroidGameStorage implements GameStorage {
   static const MethodChannel _channel =
       MethodChannel('ehtid.gamelab/storage');
 
   @override
   Future<String?> chooseFolder() => _channel.invokeMethod<String>('chooseFolder');
+
+  /// Android 11+: special all-files access must be granted explicitly in
+  /// Settings; Android 10 and older continue using the SAF picker.
+  Future<AndroidAllFilesAccessStatus> allFilesAccessStatus() async {
+    final response = await _channel.invokeMapMethod<String, dynamic>(
+        'allFilesAccessStatus');
+    return AndroidAllFilesAccessStatus(
+      supported: response?['supported'] == true,
+      granted: response?['granted'] == true,
+      sdk: (response?['sdk'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Future<String> requestAllFilesAccess() async =>
+      await _channel.invokeMethod<String>('requestAllFilesAccess') ??
+          'unsupported';
 
   /// Only launcher-visible installed apps are listed; no broad package access.
   Future<List<InstalledGameApp>> listInstalledApps() async {
