@@ -49,8 +49,7 @@ class SaveValuePriority {
     'xp', 'exp', 'experience', 'опыт',
   };
   static const _resources = <String>{
-    'stamina', 'energy', 'endurance', 'hunger', 'thirst',
-    'stamina', 'силавыносливость', 'выносливость', 'энергия',
+    'stamina', 'energy', 'endurance', 'hunger', 'thirst', 'силавыносливость', 'выносливость', 'энергия',
     'голод', 'жажда',
   };
 
