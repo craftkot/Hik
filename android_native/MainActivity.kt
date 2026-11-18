@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import android.provider.DocumentsContract
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -16,8 +17,9 @@ import java.io.ByteArrayOutputStream
 import java.util.ArrayDeque
 
 /**
- * Android Storage Access Framework bridge. No MANAGE_EXTERNAL_STORAGE and no
- * attempt to bypass Android/data/obb restrictions.
+ * Storage Access Framework + optional MANAGE_EXTERNAL_STORAGE consent.
+ * Even when all-files access is approved, Android/data/obb and private apps'
+ * internal data remain protected. Existing SAF checks are kept unchanged.
  */
 class MainActivity : FlutterActivity() {
     private val channelName = "ehtid.gamelab/storage"
@@ -75,6 +77,35 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, reply ->
                 try {
                     when (call.method) {
+                        "allFilesAccessStatus" -> {
+                            val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                            reply.success(mapOf(
+                                "supported" to supported,
+                                "granted" to (supported && Environment.isExternalStorageManager()),
+                                "sdk" to Build.VERSION.SDK_INT
+                            ))
+                        }
+                        "requestAllFilesAccess" -> {
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                                reply.success("unsupported")
+                            } else if (Environment.isExternalStorageManager()) {
+                                reply.success("granted")
+                            } else {
+                                // Special access cannot be auto-granted. The user must
+                                // switch it on in Android's system settings.
+                                try {
+                                    startActivity(Intent(
+                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        Uri.parse("package:$packageName")
+                                    ))
+                                } catch (_: android.content.ActivityNotFoundException) {
+                                    startActivity(Intent(
+                                        Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION
+                                    ))
+                                }
+                                reply.success("settings_opened")
+                            }
+                        }
                         "listInstalledApps" -> {
                             // Visible launcher activities only. Android 11+ package
                             // visibility is declared in the generated manifest.
