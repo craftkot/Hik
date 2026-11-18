@@ -75,8 +75,13 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
           _watchStatus = 'Можно отслеживать не более 12 адресов';
           return;
         }
+        final baseline = _snapshots[address];
+        if (baseline == null) {
+          _watchStatus = 'Значение адреса неизвестно. Обнови показания.';
+          return;
+        }
         _watched.add(address);
-        _watchValues[address] = _snapshots[address] ?? '0';
+        _watchValues[address] = baseline;
         _watchStatus = 'Добавлен адрес $address. Включи автообновление.';
       }
     });
@@ -315,6 +320,14 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     final game = _selected;
     final expected = _watchValues[address] ?? _snapshots[address];
     if (_busy || game == null || expected == null) return;
+    if (_watchActive) {
+      setState(() {
+        _watchActive = false;
+        _watchTimer?.cancel();
+        _watchTimer = null;
+        _watchStatus = 'Наблюдение приостановлено перед ручной записью';
+      });
+    }
     _replacement.clear();
     final newValue = await showDialog<String>(context: context,
       builder: (context) {
