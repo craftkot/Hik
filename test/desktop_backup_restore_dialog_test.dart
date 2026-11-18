@@ -1,96 +1,131 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:game_lab/core/safe_desktop_save.dart';
+import 'package:game_lab/core/crash_rollback_inspector.dart';
+import 'package:game_lab/core/desktop_save_recovery.dart';
 import 'package:game_lab/widgets/desktop_backup_restore_dialog.dart';
 
-Uint8List data(String content) => Uint8List.fromList(utf8.encode(content));
+class _FakeRecovery extends DesktopSaveRecovery {
+  _FakeRecovery(this.save);
+
+  final File save;
+  late final File backup = File('${save.path}.ehtid-backup-test.bak');
+  final Uint8List before = Uint8List.fromList([104, 112, 61, 49, 50, 48]);
+  final Uint8List after = Uint8List.fromList([104, 112, 61, 57, 57, 57]);
+  bool restored = false;
+  int calls = 0;
+
+  @override
+  Future<List<DesktopBackupEntry>> listBackups(File original) async {
+    expect(original.path, save.path);
+    return [DesktopBackupEntry(
+        backup, before.length, DateTime.utc(2026, 11, 18))];
+  }
+
+  @override
+  Future<DesktopBackupPreview> preview(File original, File selected) async {
+    expect(original.path, save.path);
+    expect(selected.path, backup.path);
+    return DesktopBackupPreview(
+      save: save, backup: backup, currentBytes: after, backupBytes: before);
+  }
+
+  @override
+  Future<String> restore(DesktopBackupPreview approved,
+      {required bool confirmed}) async {
+    expect(confirmed, isTrue);
+    expect(approved.backup.path, backup.path);
+    calls++;
+    restored = true;
+    return '${save.path}.ehtid-backup-safety.bak';
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late Directory dir;
-  late File save;
-  late Uint8List original;
-  late Uint8List modified;
-
-  setUp(() async {
-    dir = await Directory.systemTemp.createTemp('ehtid-restore-widget-');
-    save = File('${dir.path}${Platform.pathSeparator}world.sav');
-    original = data('hp=120');
-    modified = data('hp=999');
-    await save.writeAsBytes(original, flush: true);
-    await SafeDesktopSaveWriter()
-        .write(save, modified, expected: original);
-  });
-
-  tearDown(() async {
-    if (await dir.exists()) await dir.delete(recursive: true);
-  });
-
-  Future<void> openDialog(WidgetTester tester) async {
+  Future<_FakeRecovery> openDialog(WidgetTester tester,
+      {bool interrupted = false}) async {
+    // UI-only test doubles keep dart:io off the widget test's fake clock.
+    // The real disk/restore implementation has separate ordinary unit tests.
     tester.view.physicalSize = const Size(1280, 960);
     tester.view.devicePixelRatio = 1;
     addTearDown(() {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
     });
+    final save = File('${Directory.systemTemp.path}'
+        '${Platform.pathSeparator}ehtid-test-world.sav');
+    final recovery = _FakeRecovery(save);
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: Builder(builder: (context) => TextButton(
           onPressed: () => showDialog<String>(
               context: context,
-              builder: (_) => DesktopBackupRestoreDialog(save: save)),
+              builder: (_) => DesktopBackupRestoreDialog(
+                save: save,
+                recovery: recovery,
+                inspectCrash: (_) async => interrupted
+                  ? [
+                      CrashRollbackPreview(
+                        path: '${save.path}.ehtid-rollback-test.tmp',
+                        bytes: recovery.before,
+                        currentExists: true,
+                        currentBytes: recovery.after,
+                      ),
+                    ] : [],
+              )),
           child: const Text('Открыть восстановление'),
         )),
       ),
     ));
     await tester.tap(find.text('Открыть восстановление'));
     await tester.pumpAndSettle();
+    return recovery;
   }
 
   testWidgets('preview is read-only and requires separate approval',
       (tester) async {
-    await openDialog(tester);
+    final recovery = await openDialog(tester);
     expect(find.text('Восстановить сохранение'), findsOneWidget);
-    expect(find.textContaining('world.sav.ehtid-backup-'), findsWidgets);
+    expect(find.textContaining('ehtid-test-world.sav.ehtid-backup-'),
+        findsWidgets);
 
-    await tester.tap(find.textContaining('world.sav.ehtid-backup-').first);
+    await tester.tap(find.textContaining(
+        'ehtid-test-world.sav.ehtid-backup-').first);
     await tester.pumpAndSettle();
     expect(find.text('Содержимое различается'), findsOneWidget);
-    expect(await save.readAsBytes(), modified);
+    expect(recovery.restored, isFalse);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Восстановить'));
     await tester.pumpAndSettle();
     expect(find.text('Подтвердить восстановление'), findsOneWidget);
-    expect(await save.readAsBytes(), modified);
+    expect(recovery.restored, isFalse);
     await tester.tap(find.text('Отмена').last);
     await tester.pumpAndSettle();
-    expect(await save.readAsBytes(), modified);
+    expect(recovery.restored, isFalse);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Восстановить'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Подтвердить восстановление'));
     await tester.pumpAndSettle();
-    expect(await save.readAsBytes(), original);
+    expect(recovery.restored, isTrue);
+    expect(recovery.calls, 1);
     expect(find.text('Восстановить сохранение'), findsNothing);
   });
 
   testWidgets('unresolved crash rollback disables restoring backups',
       (tester) async {
-    final crash = File('${save.path}.ehtid-rollback-crash.tmp');
-    await crash.writeAsBytes(original, flush: true);
-    await openDialog(tester);
+    final recovery = await openDialog(tester, interrupted: true);
     expect(find.textContaining('Найдено аварийных файлов: 1'), findsOneWidget);
-    await tester.tap(find.textContaining('world.sav.ehtid-backup-').first);
+    await tester.tap(find.textContaining(
+        'ehtid-test-world.sav.ehtid-backup-').first);
     await tester.pumpAndSettle();
     final action = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Восстановить'));
     expect(action.onPressed, isNull);
-    expect(await save.readAsBytes(), modified);
-    expect(await crash.readAsBytes(), original);
+    expect(recovery.restored, isFalse);
   });
 }
