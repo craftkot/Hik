@@ -153,6 +153,26 @@ void main() {
     expect(commands, ['grantedFolders']);
   });
 
+  testWidgets('missing app list has a manual-folder fallback',
+      (tester) async {
+    var manualOpened = false;
+    InstalledGameApp? picked;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: Builder(builder: (context) =>
+        TextButton(onPressed: () async {
+          picked = await showInstalledAppPicker(context, const [],
+            onChooseFolder: () async { manualOpened = true; });
+        }, child: const Text('Open')))),
+    ));
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    expect(find.text('Приложение не найдено'), findsOneWidget);
+    await tester.tap(find.text('Нет игры? Выбрать папку вручную'));
+    await tester.pumpAndSettle();
+    expect(manualOpened, isTrue);
+    expect(picked, isNull);
+  });
+
   testWidgets('picker filters by name and returns package on tap',
       (tester) async {
     InstalledGameApp? selected;
