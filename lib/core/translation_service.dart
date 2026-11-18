@@ -58,7 +58,15 @@ class LocaleTranslator {
 
   bool _isNaturalText(String input) {
     if (input.trim().length < 2) return false;
-    if (!RegExp(r'[A-Za-zА-Яа-яЁё]').hasMatch(input)) return false;
+    // English, Cyrillic, Japanese Kana/Kanji, Chinese Han and Korean Hangul.
+    if (!RegExp(r'[A-Za-zА-Яа-яЁё\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]')
+        .hasMatch(input)) return false;
+    // A second pass should continue after already translated RU values,
+    // rather than repeatedly re-sending the first 100 entries.
+    if (target == 'ru' &&
+        RegExp(r'[А-Яа-яЁё]').hasMatch(input) &&
+        !RegExp(r'[A-Za-z\\u3040-\\u30ff\\u3400-\\u9fff\\uac00-\\ud7af]')
+            .hasMatch(input)) return false;
     if (RegExp(r'^(https?://|res://|[\\/]|#[0-9a-fA-F]{6,8}$)').hasMatch(input)) {
       return false;
     }
