@@ -19,8 +19,13 @@ import java.util.zip.ZipInputStream
 class ContainerStore(private val context: Context) {
     private val base = File(context.filesDir, "ehtid_container_lab")
     private val validId = Regex("^[0-9a-f]{8}-[0-9a-f-]{27,36}$")
-    private val maxInput = 200L * 1024 * 1024
+    // ZIPs must stay bounded for extraction. APKs are copied as a stream;
+    // no giant byte arrays or in-memory extraction are used.
+    private val maxWebZipInput = 200L * 1024 * 1024
+    private val maxApkInput = 8L * 1024 * 1024 * 1024
     private val maxExtracted = 50L * 1024 * 1024
+    private val minFreeSpaceReserve = 256L * 1024 * 1024
+    private val copyBufferSize = 256 * 1024
 
     private fun folder(id: String): File {
         require(validId.matches(id)) { "Invalid game ID" }
@@ -104,21 +109,62 @@ class ContainerStore(private val context: Context) {
         } ?: "game.zip"
     }
 
-    fun import(uri: Uri): Map<String, String> {
+    private fun sourceSize(uri: Uri): Long? = try {
+        context.contentResolver.query(
+            uri, arrayOf(OpenableColumns.SIZE), null, null, null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index < 0 || cursor.isNull(index)) null
+            else cursor.getLong(index).takeIf { it >= 0L }
+        }
+    } catch (_: Exception) {
+        // Some document providers cannot report the size ahead of time.
+        null
+    }
+
+    fun import(uri: Uri,
+        progress: ((Long, Long?) -> Unit)? = null): Map<String, String> {
         val name = displayName(uri).substringAfterLast('/').take(120)
         val lower = name.lowercase()
         require(lower.endsWith(".zip") || lower.endsWith(".apk")) {
             "Choose HTML5 ZIP or standalone APK"
         }
+        val isApk = lower.endsWith(".apk")
+        val limit = if (isApk) maxApkInput else maxWebZipInput
+        val totalBytes = sourceSize(uri)
+        require(totalBytes == null || totalBytes <= limit) {
+            "File is above import limit (APK: 8 GiB; ZIP: 200 MiB)"
+        }
+        // A staged APK is a second copy of the file. Abort before writing
+        // when the provider reported its size and the phone lacks space.
+        require(base.mkdirs() || base.isDirectory)
+        val available = base.usableSpace
+        require(available > minFreeSpaceReserve) {
+            "Not enough device storage. Keep at least 256 MiB free."
+        }
+        require(totalBytes == null ||
+            totalBytes <= available - minFreeSpaceReserve) {
+            "Not enough storage for a separate APK copy (need more free space)."
+        }
+
         val id = UUID.randomUUID().toString()
         val dir = folder(id)
         require(dir.mkdirs())
         try {
-            val isApk = lower.endsWith(".apk")
             val source = File(dir, if (isApk) "payload.apk" else "payload.zip")
+            progress?.invoke(0L, totalBytes)
             context.contentResolver.openInputStream(uri)?.use { input ->
-                source.outputStream().use { output ->
-                    copyBounded(input, output, maxInput)
+                source.outputStream().buffered(copyBufferSize).use { output ->
+                    copyBounded(input, output, limit,
+                        onChunk = { copied ->
+                            // For unknown content size (cloud providers), keep
+                            // enforcing the storage reserve while streaming.
+                            require(base.usableSpace > minFreeSpaceReserve) {
+                                "Not enough free space to finish import"
+                            }
+                            progress?.invoke(copied, totalBytes)
+                        })
                 }
             } ?: error("Selected file cannot be read")
             if (isApk) {
@@ -149,16 +195,24 @@ class ContainerStore(private val context: Context) {
     }
 
     private fun copyBounded(input: java.io.InputStream,
-        output: java.io.OutputStream, limit: Long): Long {
+        output: java.io.OutputStream, limit: Long,
+        onChunk: ((Long) -> Unit)? = null): Long {
         var total = 0L
-        val buffer = ByteArray(32768)
+        var lastReported = 0L
+        val buffer = ByteArray(copyBufferSize)
         while (true) {
             val size = input.read(buffer)
             if (size < 0) break
-            total += size
-            require(total <= limit) { "Archive too large" }
+            total += size.toLong()
+            require(total <= limit) { "File exceeds import limit" }
             output.write(buffer, 0, size)
+            // Throttle disk checks and UI callbacks to every 8 MiB.
+            if (onChunk != null && total - lastReported >= 8L * 1024 * 1024) {
+                onChunk(total)
+                lastReported = total
+            }
         }
+        onChunk?.invoke(total)
         return total
     }
 

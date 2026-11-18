@@ -29,6 +29,8 @@ class MainActivity : FlutterActivity() {
     private var pendingPicker: MethodChannel.Result? = null
     private val containerPickCode = 8820
     private var pendingContainerPicker: MethodChannel.Result? = null
+    private var containerImporting = false
+    private var containerProgressChannel: MethodChannel? = null
 
     // A document ID alone is NOT a unique locator across different SAF trees.
     // Cache the exact document URI and its originating tree/parent/name together.
@@ -75,6 +77,8 @@ class MainActivity : FlutterActivity() {
                     result.error("overlay", exception.message ?: "Overlay unavailable", null)
                 }
             }
+        containerProgressChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger, "ehtid.gamelab/container_progress")
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
             "ehtid.gamelab/container").setMethodCallHandler { call, reply ->
             try {
@@ -83,8 +87,8 @@ class MainActivity : FlutterActivity() {
                     "list" -> reply.success(store.list())
                     "createDemo" -> reply.success(store.createDemo())
                     "import" -> {
-                        if (pendingContainerPicker != null) {
-                            reply.error("busy", "Import picker already active", null)
+                        if (pendingContainerPicker != null || containerImporting) {
+                            reply.error("busy", "An import is already active", null)
                         } else {
                             pendingContainerPicker = reply
                             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -282,20 +286,44 @@ class MainActivity : FlutterActivity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == containerPickCode) {
             val response = pendingContainerPicker
-            pendingContainerPicker = null
             val uri = data?.data
             if (resultCode != Activity.RESULT_OK || uri == null) {
+                pendingContainerPicker = null
                 response?.success(null)
             } else {
-                // ZIP extraction and APK copying may take seconds. Do not
-                // block Flutter's Android UI thread while importing.
+                // Large APKs are copied on a worker thread. While importing,
+                // keep the pending result so a second picker cannot start.
+                containerImporting = true
                 Thread {
                     try {
-                        val imported = ContainerStore(this).import(uri)
-                        runOnUiThread { response?.success(imported) }
+                        var lastUpdateTime = 0L
+                        val imported = ContainerStore(this).import(uri) { copied, total ->
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            if (copied == 0L ||
+                                total != null && copied >= total ||
+                                now - lastUpdateTime >= 150L) {
+                                lastUpdateTime = now
+                                runOnUiThread {
+                                    containerProgressChannel?.invokeMethod(
+                                        "importProgress", mapOf(
+                                            "copiedBytes" to copied,
+                                            "totalBytes" to total
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                        runOnUiThread {
+                            containerImporting = false
+                            pendingContainerPicker = null
+                            response?.success(imported)
+                        }
                     } catch (error: Exception) {
                         runOnUiThread {
-                            response?.error("import", error.message ?: "Import failed", null)
+                            containerImporting = false
+                            pendingContainerPicker = null
+                            response?.error("import",
+                                error.message ?: "Import failed", null)
                         }
                     }
                 }.start()
