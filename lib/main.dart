@@ -184,7 +184,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       return;
     }
     try {
-      final apps = await (_storage as AndroidGameStorage).listInstalledApps();
+      final apps = await _storage.listInstalledApps();
       if (!mounted) return;
       final chosen = await showInstalledAppPicker(context, apps);
       if (!mounted || chosen == null) return;
@@ -223,7 +223,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       // is then safely remembered for this particular game.
       final folder = await _storage.chooseFolder();
       if (folder == null || !mounted) return;
-      await (_storage as AndroidGameStorage).linkFolderToApp(selected, folder);
+      await _storage.linkFolderToApp(selected, folder);
       if (!mounted) return;
       await _scan();
       if (mounted && _files.isEmpty) {
