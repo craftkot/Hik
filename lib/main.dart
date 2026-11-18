@@ -110,6 +110,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   InstalledGameApp? _selectedApp;
   String? _overlayNumber;
   final List<String> _extraFolders = [];
+  // Only explicitly confirmed save-discovery directories get unfiltered
+  // save listings. Installation folders still use the normal heuristics.
+  final Set<String> _windowsFoundSaveRoots = {};
+  Set<String> _windowsFoundSaveFileIds = {};
   List<GameFile> _files = [];
   GameFile? _selected;
   Uint8List? _bytes;
@@ -261,6 +265,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
+        _windowsFoundSaveRoots.clear();
+        _windowsFoundSaveFileIds.clear();
         _query.clear();
         _selected = null; _bytes = null;
         _mobilePreview = false; _files = []; _profile = null;
@@ -443,6 +449,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       } else {
         _extraFolders.addAll(additions);
       }
+      _windowsFoundSaveRoots.addAll(additions);
       _section = Workspace.saves;
     });
     await _scan();
@@ -560,12 +567,17 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       final roots = [folder, ..._extraFolders];
       final found = <GameFile>[];
       final ids = <String>{};
+      final foundSaveFileIds = <String>{};
       final errors = <String>[];
       for (var i = 0; i < roots.length; i++) {
         try {
           final batch = await _storage.scan(roots[i]);
           for (final item in batch) {
             if (!ids.add(item.id)) continue;
+            if (Platform.isWindows &&
+                _windowsFoundSaveRoots.contains(roots[i])) {
+              foundSaveFileIds.add(item.id);
+            }
             found.add(GameFile(
               id: item.id, name: item.name, size: item.size,
               relativePath: roots.length == 1
@@ -583,7 +595,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       found.sort((a, b) => a.relativePath.toLowerCase()
           .compareTo(b.relativePath.toLowerCase()));
       if (!mounted) return;
-      setState(() { _files = found; _profile = detectGameProfile(found);
+      setState(() { _files = found;
+        _windowsFoundSaveFileIds = foundSaveFileIds;
+        _profile = detectGameProfile(found);
         _selected = null; _bytes = null; _originalText = null;
         _mobilePreview = false;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
@@ -605,7 +619,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         Workspace.preloads => f.isLikelyPreload || (!f.isSave && !f.isLocalization),
         // In Android manual-folder mode, unusual save extensions are common.
         // Show every accessible file and let the user inspect it.
-        Workspace.saves => (Platform.isAndroid && _folder != null) || f.isSave,
+        Workspace.saves => (Platform.isAndroid && _folder != null) ||
+            f.isSave ||
+            (Platform.isWindows && _windowsFoundSaveFileIds.contains(f.id) &&
+              !f.isImage && !f.isZipCandidate),
         Workspace.localize => f.isLocalization ||
             GameLocaleCandidates.canTranslate(f),
         Workspace.cheats => false,
