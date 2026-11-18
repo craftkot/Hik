@@ -171,7 +171,7 @@ class WindowsLiveMemoryService {
       if (format == LiveValueFormat.float32) {
         // Reject nonzero values that round to zero in the native Float32 format.
         if (parsed.abs() > 3.4028235e38 ||
-            (parsed != 0 && parsed.abs() < 1.401298464324817e-45)) {
+            (parsed != 0 && parsed.abs() < 7.006492321624085e-46)) {
           throw const FormatException('Значение вне диапазона Float32');
         }
       }
