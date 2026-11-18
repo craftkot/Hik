@@ -127,6 +127,31 @@ void main() {
     expect(store.writes, isEmpty);
   });
 
+  test('translation must preserve keys and non-text JSON values', () async {
+    final store = FakeGameStorage({
+      'locale': Uint8List.fromList(utf8.encode(
+          '{"id":5,"hello":"Hello","nested":{"enabled":true}}')),
+    });
+    final flow = GameLocaleWorkflow(store);
+    final changedKey = await flow.prepare([localeFile],
+      (source) async => const LocaleTextResult(
+          '{"id":5,"hi":"Привет","nested":{"enabled":true}}', 1));
+    expect(changedKey.drafts, isEmpty);
+    expect(changedKey.skipped.single, contains('JSON-ключи'));
+
+    final changedNumber = await flow.prepare([localeFile],
+      (source) async => const LocaleTextResult(
+          '{"id":10,"hello":"Привет","nested":{"enabled":true}}', 1));
+    expect(changedNumber.drafts, isEmpty);
+    expect(changedNumber.skipped.single, contains('JSON-ключи'));
+
+    final valid = await flow.prepare([localeFile],
+      (source) async => const LocaleTextResult(
+          '{"id":5,"hello":"Привет","nested":{"enabled":true}}', 1));
+    expect(valid.drafts, hasLength(1));
+    expect(store.writes, isEmpty);
+  });
+
   test('large, binary and backup locale files cannot enter batch', () {
     final huge = GameFile(
       id: 'huge', name: 'strings.json',
