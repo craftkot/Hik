@@ -21,7 +21,7 @@ class InstalledGameApp {
     final uri = Uri.parse(folder);
     final package = uri.host;
     if (uri.scheme != 'ehtid-app' ||
-        !RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*(?:\\.[a-zA-Z0-9_]+)+$')
+        !RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+$')
             .hasMatch(package)) {
       throw const FormatException('Неверный идентификатор приложения');
     }
@@ -49,10 +49,10 @@ class AndroidAppSaveDiscovery {
   }
 
   static bool matchesPath(InstalledGameApp app, String path) {
-    final lower = path.toLowerCase().replaceAll('\\\\', '/');
+    final lower = path.toLowerCase().replaceAll('\\', '/');
     final pkg = app.packageName.toLowerCase();
     // Package name must be a whole segment/token, not e.g. com.foo.fake.
-    if (RegExp('(^|[^a-z0-9_.])${RegExp.escape(pkg)}(\\$|[^a-z0-9_.])')
+    if (RegExp(r'(^|[^a-z0-9_.])' + RegExp.escape(pkg) + r'($|[^a-z0-9_.])')
         .hasMatch(lower)) {
       return true;
     }
