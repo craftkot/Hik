@@ -116,6 +116,39 @@ class MainActivity : FlutterActivity() {
                                     it.uri.scheme == "content" }
                                 .map { it.uri.toString() })
                         }
+                        "linkGameFolder" -> {
+                            val pkg = call.argument<String>("package")
+                                ?: error("Missing package")
+                            val uri = Uri.parse(call.argument<String>("uri")
+                                ?: error("Missing tree URI"))
+                            if (!Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\\\.[a-zA-Z0-9_]+)+\\$").matches(pkg)) {
+                                error("Invalid package")
+                            }
+                            // Only a root explicitly granted by the user may
+                            // be associated with the selected app.
+                            checkAccess(uri)
+                            val prefs = getSharedPreferences("ehtid.game_roots", MODE_PRIVATE)
+                            val key = "roots:$pkg"
+                            val roots = prefs.getStringSet(key, emptySet())
+                                ?.toMutableSet() ?: mutableSetOf()
+                            if (roots.size >= 6 && !roots.contains(uri.toString())) {
+                                error("Up to 6 user-approved folders per game")
+                            }
+                            roots.add(uri.toString())
+                            prefs.edit().putStringSet(key, roots).apply()
+                            reply.success(true)
+                        }
+                        "linkedGameFolders" -> {
+                            val pkg = call.argument<String>("package")
+                                ?: error("Missing package")
+                            val allowed = contentResolver.persistedUriPermissions
+                                .filter { it.isReadPermission }
+                                .map { it.uri.toString() }.toSet()
+                            val roots = getSharedPreferences("ehtid.game_roots", MODE_PRIVATE)
+                                .getStringSet("roots:$pkg", emptySet()).orEmpty()
+                                .filter { it in allowed }
+                            reply.success(roots)
+                        }
                         "chooseFolder" -> {
                             if (pendingPicker != null) {
                                 reply.error("busy", "Folder picker is already open", null)
