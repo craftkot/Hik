@@ -63,6 +63,14 @@ void main() {
     expect(find.text('1 JSON'), findsOneWidget);
     expect(find.text('Доступ к папке игры'), findsOneWidget);
     await tester.tap(find.text('Подготовить перевод (1 файлов)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Подготовить перевод игры?'), findsOneWidget);
+    expect(find.textContaining('строки будут переведены'), findsOneWidget);
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Подготовить перевод (1 файлов)'));
     await tester.pump();
     expect(find.textContaining('Укажи HTTPS LibreTranslate'), findsWidgets);
   });
