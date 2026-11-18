@@ -1,4 +1,4 @@
-# EHTID Game Lab Alpha 0.4.10 — Android
+# EHTID Game Lab Alpha 0.4.11 — Android
 
 **Версия:** Android APK, интерфейс с оригинальной иконкой и тёмно-фиолетовой темой.
 
