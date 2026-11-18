@@ -621,7 +621,9 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                 child: hits.isEmpty
                   ? const Center(child: Text('Значение не найдено'))
                   : ListView.builder(itemCount: hits.length,
-                      itemBuilder: (context, i) => ListTile(
+                      itemBuilder: (context, i) => Material(
+                        color: Colors.transparent,
+                        child: ListTile(
                         dense: true,
                         leading: const Icon(Icons.pin_outlined,
                           color: _purple, size: 19),
@@ -637,7 +639,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                           icon: Icon(_watched.contains(hits[i])
                               ? Icons.star : Icons.star_border,
                             color: _cyan)),
-                        onTap: _busy ? null : () => _edit(hits[i])))),
+                        onTap: _busy ? null : () => _edit(hits[i]))))),
             ],
             const SizedBox(height: 12),
             const Text('Работает лишь с разрешёнными Windows областями памяти. '
