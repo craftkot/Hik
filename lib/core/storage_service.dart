@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import 'android_app_save_discovery.dart';
 import 'game_file.dart';
 import 'safe_desktop_save.dart';
 
@@ -29,8 +30,52 @@ class AndroidGameStorage implements GameStorage {
   @override
   Future<String?> chooseFolder() => _channel.invokeMethod<String>('chooseFolder');
 
+  /// Only launcher-visible installed apps are listed; no broad package access.
+  Future<List<InstalledGameApp>> listInstalledApps() async {
+    final rows = await _channel.invokeListMethod<dynamic>('listInstalledApps');
+    return (rows ?? []).map((entry) {
+      final row = Map<Object?, Object?>.from(entry as Map);
+      return InstalledGameApp(
+        packageName: row['package'] as String,
+        label: row['label'] as String,
+        isGame: row['isGame'] == true,
+      );
+    }).toList();
+  }
+
+  Future<List<String>> approvedFolders() async =>
+      await _channel.invokeListMethod<String>('grantedFolders') ?? [];
+
   @override
   Future<List<GameFile>> scan(String folder) async {
+    if (Uri.tryParse(folder)?.scheme == 'ehtid-app') {
+      return discoverAppFiles(InstalledGameApp.fromVirtualFolder(folder));
+    }
+    return _scanTree(folder);
+  }
+
+  Future<List<GameFile>> discoverAppFiles(InstalledGameApp app) async {
+    final roots = await approvedFolders();
+    final files = <String, GameFile>{};
+    // Discovery never requests a new permission or reads private app data.
+    // Skip failed/inaccessible grants but keep the other approved trees.
+    for (final root in roots.take(12)) {
+      try {
+        final rows = await _scanTree(root);
+        for (final file in rows) {
+          if (AndroidAppSaveDiscovery.matches(
+              app: app, treeUri: root, relativePath: file.relativePath)) {
+            files.putIfAbsent(file.id, () => file);
+          }
+        }
+      } catch (_) {
+        // The user may have revoked a permission or unmounted a provider.
+      }
+    }
+    return files.values.toList();
+  }
+
+  Future<List<GameFile>> _scanTree(String folder) async {
     final raw = await _channel.invokeListMethod<dynamic>('scanFolder',
         <String, dynamic>{'uri': folder});
     return (raw ?? []).map((entry) {
