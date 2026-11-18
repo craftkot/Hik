@@ -69,6 +69,8 @@ void main() {
           ];
         case 'grantedFolders':
           return [publicTree];
+        case 'linkedGameFolders':
+          return <String>[];
         case 'scanFolder':
           final uri = (call.arguments as Map)['uri'] as String;
           scanned.add(uri);
@@ -93,6 +95,43 @@ void main() {
     final files = await storage.scan(apps.single.virtualFolder);
     expect(files.map((f) => f.name), ['player.json']);
     expect(scanned, [publicTree]);
+  });
+
+  test('explicitly linked folder is searched even without a game-like name',
+      () async {
+    const channel = MethodChannel('ehtid.gamelab/storage');
+    const customRoot =
+        'content://com.android.externalstorage.documents/tree/primary%3ADownload';
+    final commands = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      commands.add(call.method);
+      switch (call.method) {
+        case 'grantedFolders':
+          return [customRoot];
+        case 'linkedGameFolders':
+          return [customRoot];
+        case 'scanFolder':
+          return [
+            {'uri': 'content://save', 'name': 'userdata.bin',
+              'relativePath': 'unknown-folder/userdata.bin', 'size': 18},
+          ];
+        case 'linkGameFolder':
+          return true;
+      }
+      throw PlatformException(code: 'unexpected');
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+    final storage = AndroidGameStorage();
+    await storage.linkFolderToApp(app, customRoot);
+    final files = await storage.scan(app.virtualFolder);
+    expect(files.map((f) => f.name), ['userdata.bin']);
+    expect(commands, [
+      'linkGameFolder', 'grantedFolders', 'linkedGameFolders', 'scanFolder',
+    ]);
   });
 
   test('no previously granted SAF folders means no automatic access',
