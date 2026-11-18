@@ -278,18 +278,23 @@ class _AndroidGameTranslationPanelState
               icon: const Icon(Icons.create_new_folder_outlined, size: 18),
               label: const Text('Доступ к папке игры'),
             )),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            dense: true,
-            title: const Text('Перевод на телефоне (ML Kit)',
-              style: TextStyle(fontSize: 12)),
-            subtitle: const Text('Без API-ключа. При первом запуске '
-                'скачаются языковые модели.',
-              style: TextStyle(fontSize: 10)),
-            value: _useOnDevice,
-            onChanged: _busy ? null :
-                (value) => setState(() => _useOnDevice = value),
-          ),
+          Row(children: [
+            const Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Перевод на телефоне (ML Kit)',
+                  style: TextStyle(fontSize: 12)),
+                Text('Без API-ключа. При первом запуске '
+                    'скачаются языковые модели.',
+                  style: TextStyle(fontSize: 10)),
+              ],
+            )),
+            Switch.adaptive(
+              value: _useOnDevice,
+              onChanged: _busy ? null :
+                  (value) => setState(() => _useOnDevice = value),
+            ),
+          ]),
           if (_useOnDevice) Row(children: [
             Expanded(child: DropdownButtonFormField<String>(
               initialValue: _sourceLanguage,
