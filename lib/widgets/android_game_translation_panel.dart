@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 
 import '../core/game_file.dart';
 import '../core/game_locale_workflow.dart';
@@ -35,6 +36,8 @@ class _AndroidGameTranslationPanelState
   final _endpoint = TextEditingController();
   final _apiKey = TextEditingController();
   String _language = 'ru';
+  String _sourceLanguage = 'en';
+  bool _useOnDevice = true;
   bool _busy = false;
   String _status = '';
 
@@ -64,14 +67,20 @@ class _AndroidGameTranslationPanelState
           'и разреши чтение открытой папки игры.');
       return;
     }
-    final endpoint = Uri.tryParse(_endpoint.text.trim());
-    if (endpoint == null || !endpoint.hasAuthority ||
-        !(endpoint.scheme == 'https' ||
-          (endpoint.scheme == 'http' &&
-            (endpoint.host == 'localhost' ||
-             endpoint.host == '127.0.0.1')))) {
-      _notice('Укажи HTTPS LibreTranslate URL /translate '
-          'или локальный HTTP-сервер.');
+    Uri? endpoint;
+    if (!_useOnDevice) {
+      endpoint = Uri.tryParse(_endpoint.text.trim());
+      if (endpoint == null || !endpoint.hasAuthority ||
+          !(endpoint.scheme == 'https' ||
+            (endpoint.scheme == 'http' &&
+              (endpoint.host == 'localhost' ||
+               endpoint.host == '127.0.0.1')))) {
+        _notice('Укажи HTTPS LibreTranslate URL /translate '
+            'или локальный HTTP-сервер.');
+        return;
+      }
+    } else if (_sourceLanguage == _language) {
+      _notice('Исходный язык и язык перевода должны отличаться');
       return;
     }
     final accepted = await showDialog<bool>(
@@ -80,8 +89,12 @@ class _AndroidGameTranslationPanelState
         title: const Text('Подготовить перевод игры?'),
         content: Text('Найдены ${candidates.length} JSON-локализаций. '
           'Переведём до ${GameLocaleCandidates.maxBatchFiles} файлов '
-          'и до 100 строк на файл. Тексты строк будут отправлены на '
-          'сервер ${endpoint.host}. Исходные файлы пока не изменятся. '
+          'и до 100 строк на файл. '
+          '${_useOnDevice ? 'Модель Google ML Kit может потребовать '
+            'первую загрузку через интернет; сами строки будут переведены '
+            'на телефоне.' : 'Строки будут отправлены на сервер '
+            '${endpoint!.host}.'} '
+          'Исходные файлы пока не изменятся. '
           'Результат покажем перед применением.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false),
@@ -99,13 +112,28 @@ class _AndroidGameTranslationPanelState
       _busy = true;
       _status = 'Подготовка перевода…';
     });
+    OnDeviceTranslator? onDevice;
     try {
+      if (_useOnDevice) {
+        TranslateLanguage lang(String code) => switch (code) {
+          'ja' => TranslateLanguage.japanese,
+          'zh' => TranslateLanguage.chinese,
+          'ko' => TranslateLanguage.korean,
+          'ru' => TranslateLanguage.russian,
+          _ => TranslateLanguage.english,
+        };
+        onDevice = OnDeviceTranslator(
+          sourceLanguage: lang(_sourceLanguage),
+          targetLanguage: lang(_language),
+        );
+      }
       batch = await workflow.prepare(widget.files, (source) async {
         final translator = LocaleTranslator(
           endpoint: endpoint,
           target: _language,
           apiKey: _apiKey.text.trim(),
           maxStrings: 100,
+          translateText: onDevice?.translateText,
         );
         final text = await translator.translateJson(source);
         return LocaleTextResult(text, translator.translated);
@@ -117,6 +145,7 @@ class _AndroidGameTranslationPanelState
       _notice('Ошибка подготовки: $error');
       return;
     } finally {
+      onDevice?.close();
       if (mounted) setState(() => _busy = false);
     }
     if (!mounted) return;
@@ -249,36 +278,79 @@ class _AndroidGameTranslationPanelState
               icon: const Icon(Icons.create_new_folder_outlined, size: 18),
               label: const Text('Доступ к папке игры'),
             )),
-          TextField(
-            controller: _endpoint,
-            decoration: const InputDecoration(
-              labelText: 'Сервер LibreTranslate',
-              hintText: 'https://your-server/translate',
-            ),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            title: const Text('Перевод на телефоне (ML Kit)',
+              style: TextStyle(fontSize: 12)),
+            subtitle: const Text('Без API-ключа. При первом запуске '
+                'скачаются языковые модели.',
+              style: TextStyle(fontSize: 10)),
+            value: _useOnDevice,
+            onChanged: _busy ? null :
+                (value) => setState(() => _useOnDevice = value),
           ),
-          const SizedBox(height: 7),
-          Row(children: [
-            Expanded(child: TextField(
-              controller: _apiKey,
-              obscureText: true,
-              decoration: const InputDecoration(
-                  labelText: 'API-ключ (если нужен)'),
+          if (_useOnDevice) Row(children: [
+            Expanded(child: DropdownButtonFormField<String>(
+              initialValue: _sourceLanguage,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Исходный язык'),
+              items: const [
+                DropdownMenuItem(value: 'en', child: Text('English')),
+                DropdownMenuItem(value: 'ja', child: Text('日本語')),
+                DropdownMenuItem(value: 'zh', child: Text('中文')),
+                DropdownMenuItem(value: 'ko', child: Text('한국어')),
+              ],
+              onChanged: _busy ? null : (value) {
+                if (value != null) setState(() => _sourceLanguage = value);
+              },
             )),
             const SizedBox(width: 8),
-            SizedBox(width: 115, child: DropdownButtonFormField<String>(
+            Expanded(child: DropdownButtonFormField<String>(
               initialValue: _language,
               isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Язык'),
+              decoration: const InputDecoration(labelText: 'Перевод на'),
               items: const [
-                DropdownMenuItem(value: 'ru', child: Text('RU')),
-                DropdownMenuItem(value: 'en', child: Text('EN')),
-                DropdownMenuItem(value: 'ja', child: Text('JA')),
+                DropdownMenuItem(value: 'ru', child: Text('Русский')),
+                DropdownMenuItem(value: 'en', child: Text('English')),
+                DropdownMenuItem(value: 'ja', child: Text('日本語')),
               ],
               onChanged: _busy ? null : (value) {
                 if (value != null) setState(() => _language = value);
               },
             )),
-          ]),
+          ]) else ...[
+            TextField(
+              controller: _endpoint,
+              decoration: const InputDecoration(
+                labelText: 'Сервер LibreTranslate',
+                hintText: 'https://your-server/translate',
+              ),
+            ),
+            const SizedBox(height: 7),
+            Row(children: [
+              Expanded(child: TextField(
+                controller: _apiKey,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'API-ключ (если нужен)'),
+              )),
+              const SizedBox(width: 8),
+              SizedBox(width: 115, child: DropdownButtonFormField<String>(
+                initialValue: _language,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Язык'),
+                items: const [
+                  DropdownMenuItem(value: 'ru', child: Text('RU')),
+                  DropdownMenuItem(value: 'en', child: Text('EN')),
+                  DropdownMenuItem(value: 'ja', child: Text('JA')),
+                ],
+                onChanged: _busy ? null : (value) {
+                  if (value != null) setState(() => _language = value);
+                },
+              )),
+            ]),
+          ],
           const SizedBox(height: 8),
           SizedBox(width: double.infinity, child: FilledButton.icon(
             onPressed: _busy ? null : _prepare,
@@ -294,9 +366,13 @@ class _AndroidGameTranslationPanelState
               color: Color(0xFF5EE9F5), fontSize: 11)),
           ),
           const SizedBox(height: 4),
-          const Text('Текст уходит выбранному серверу. Сначала предпросмотр, '
-              'затем подтверждение записи с резервными копиями.',
-              style: TextStyle(fontSize: 10, color: Color(0xFFAAA5BE))),
+          Text(_useOnDevice
+              ? 'Перевод на устройстве (после загрузки модели). '
+                  'Сначала предпросмотр, затем резервные копии.'
+              : 'Текст уходит выбранному серверу. '
+                  'Предпросмотр и подтверждение перед записью.',
+              style: const TextStyle(
+                fontSize: 10, color: Color(0xFFAAA5BE))),
         ],
       ),
     );
