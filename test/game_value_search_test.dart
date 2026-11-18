@@ -114,6 +114,7 @@ void main() {
       _file('backup', 'slot.sav.ehtid-backup-123.tmp', 4),
       _file('rollback', 'slot.sav.ehtid-rollback-123.tmp', 4),
       _file('stage', 'slot.sav.ehtid-stage-123.tmp', 4),
+      _file('pending', 'slot.sav.ehtid-pending-123.tmp', 4),
     ];
     final bytes = Uint8List.fromList([42, 0, 0, 0]);
     final report = await GameValueSearch.search(
@@ -124,7 +125,7 @@ void main() {
       query: '42',
     );
     expect(report.scanned, 1);
-    expect(report.skipped, 3);
+    expect(report.skipped, 4);
     expect(report.hits, isNotEmpty);
     expect(report.hits.every((hit) => hit.file.id == 'live'), true);
   });

@@ -21,6 +21,7 @@ import 'widgets/onscreen_number_picker.dart';
 import 'widgets/live_memory_panel.dart';
 import 'widgets/android_floating_panel.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
+import 'widgets/save_field_browser.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -680,7 +681,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       final found = listJsonFields(_editor.text,
           max: _section == Workspace.saves ? 2500 : 500);
       fields = _section == Workspace.saves
-          ? prioritizeJsonFields(found, max: 500)
+          ? prioritizeJsonFields(found, max: 2500)
           : found;
     } catch (error) {
       _message('Не удалось прочитать JSON: $error');
@@ -690,72 +691,28 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       _message('В JSON нет доступных полей');
       return;
     }
-    await showModalBottomSheet<void>(context: context, isScrollControlled: true,
-      backgroundColor: _panel, builder: (sheetContext) => SafeArea(
-        child: FractionallySizedBox(heightFactor: 0.8,
-          child: Column(children: [
-            Padding(padding: const EdgeInsets.all(16),
-              child: Row(children: [
-                const Expanded(child: Text('Поля сохранения · JSON',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold))),
-                IconButton(onPressed: () => Navigator.pop(sheetContext),
-                  icon: const Icon(Icons.close)),
-              ])),
-            const Divider(height: 1),
-            if (_section == Workspace.saves) Padding(
-              padding: const EdgeInsets.fromLTRB(16, 9, 16, 4),
-              child: Row(children: [
-                const Icon(Icons.auto_awesome, size: 16, color: _accent),
-                const SizedBox(width: 7),
-                Expanded(child: Text(
-                  'Важные поля сначала: ${fields.where((field) => field.category.important).length} '
-                  'из ${fields.length}. Подсказки по названиям — проверь значения.',
-                  style: const TextStyle(fontSize: 11, color: _muted))),
-              ]),
-            ),
-            Expanded(child: ListView.builder(itemCount: fields.length,
-              itemBuilder: (context, i) {
-                final field = fields[i];
-                return ListTile(
-                  leading: field.category.important
-                      ? const Icon(Icons.star_rounded, size: 18, color: _accent)
-                      : null,
-                  title: Row(children: [
-                    Expanded(child: Text(field.pointer, maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontFamily: 'monospace', fontSize: 12,
-                        fontWeight: field.category.important
-                            ? FontWeight.w700 : FontWeight.w400))),
-                    if (field.category.important) Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: _accent.withValues(alpha: .12),
-                          borderRadius: BorderRadius.circular(7)),
-                        child: Text(field.category.label,
-                          style: const TextStyle(fontSize: 10,
-                              color: _accent))),
-                    ),
-                  ]),
-                  subtitle: Text(field.preview, maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                  trailing: const Icon(Icons.edit_outlined, size: 18),
-                  onTap: () async {
-                    final changed = await _editJsonField(field);
-                    if (changed && sheetContext.mounted) {
-                      Navigator.pop(sheetContext);
-                    }
-                  },
-                );
-              })),
-            const Padding(padding: EdgeInsets.all(10),
-              child: Text('Выбери поле. Значение вводится в JSON-формате: '
-                  'число 120, строка "текст", true или false.',
-                style: TextStyle(fontSize: 11, color: _muted))),
-          ]))),
-      );
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _panel,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.8,
+          child: SaveFieldBrowser(
+            fields: fields,
+            isSave: _section == Workspace.saves,
+            onClose: () => Navigator.pop(sheetContext),
+            onEdit: (field) async {
+              final changed = await _editJsonField(field);
+              if (changed && sheetContext.mounted) {
+                Navigator.pop(sheetContext);
+              }
+              return changed;
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   Future<bool> _editJsonField(JsonField field) async {
@@ -1269,7 +1226,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.5 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.6 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 
