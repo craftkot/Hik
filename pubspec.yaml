@@ -1,7 +1,7 @@
 name: game_lab
 description: EHTID Game Lab - local single-player game files workspace.
 publish_to: none
-version: 0.4.13-alpha.1+21
+version: 0.4.14-alpha.1+22
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
