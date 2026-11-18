@@ -27,6 +27,8 @@ for permission in (
     'android.permission.FOREGROUND_SERVICE',
     'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
     'android.permission.POST_NOTIFICATIONS',
+    # Special app access on Android 11+; only the user may enable it in Settings.
+    'android.permission.MANAGE_EXTERNAL_STORAGE',
 ):
     if f'android:name="{permission}"' not in content:
         content = content.replace(
