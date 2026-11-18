@@ -267,11 +267,12 @@ class _AndroidGameTranslationPanelState
             const SizedBox(width: 8),
             SizedBox(width: 115, child: DropdownButtonFormField<String>(
               initialValue: _language,
+              isExpanded: true,
               decoration: const InputDecoration(labelText: 'Язык'),
               items: const [
-                DropdownMenuItem(value: 'ru', child: Text('Русский')),
-                DropdownMenuItem(value: 'en', child: Text('English')),
-                DropdownMenuItem(value: 'ja', child: Text('日本語')),
+                DropdownMenuItem(value: 'ru', child: Text('RU')),
+                DropdownMenuItem(value: 'en', child: Text('EN')),
+                DropdownMenuItem(value: 'ja', child: Text('JA')),
               ],
               onChanged: _busy ? null : (value) {
                 if (value != null) setState(() => _language = value);
