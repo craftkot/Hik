@@ -154,16 +154,11 @@ internal static class Program
                     processedBytes += primary;
                     if (success)
                     {
-                        int last = Math.Min(primary, (int)read - needle.Length + 1);
-                        int offset = (int)((alignment - position % alignment) % alignment);
-                        for (; offset < last; offset += alignment)
-                        {
-                            if (buffer.AsSpan(offset, needle.Length).SequenceEqual(needle))
-                            {
-                                hits.Add("0x" + (position + offset).ToString("X", CultureInfo.InvariantCulture));
-                                if (hits.Count >= request.MaxResults) { capped = true; break; }
-                            }
-                        }
+                        // Both aligned and deep scans share exactly the
+                        // same cross-chunk boundary and candidate limits.
+                        if (AddMatches(buffer, needle, position, alignment,
+                            primary, (int)read, hits, request.MaxResults))
+                            capped = true;
                     }
                     position += primary;
                 }
@@ -177,6 +172,29 @@ internal static class Program
             note = capped ? "Limit reached; refine or use a rarer value to find more" :
                 "Exact search finished; these are candidate addresses, not verified HP/mana"
         };
+    }
+
+    /// Match candidate numeric bytes while respecting the primary chunk
+    /// boundary. Additional overlapping bytes only complete values that
+    /// *start* in the current chunk; never report the same hit twice.
+    private static bool AddMatches(byte[] buffer, byte[] needle,
+        long position, int alignment, int primaryLength, int readableLength,
+        List<string> hits, int maxResults)
+    {
+        if (alignment is not (1 or 4 or 8))
+            throw new ArgumentException("Invalid scan alignment");
+        int last = Math.Min(primaryLength, readableLength - needle.Length + 1);
+        if (last <= 0) return false;
+        int offset = (int)((alignment - position % alignment) % alignment);
+        for (; offset < last; offset += alignment)
+        {
+            if (buffer.AsSpan(offset, needle.Length).SequenceEqual(needle))
+            {
+                hits.Add("0x" + (position + offset).ToString("X", CultureInfo.InvariantCulture));
+                if (hits.Count >= maxResults) return true;
+            }
+        }
+        return false;
     }
 
     private static object Refine(Request request)
@@ -385,6 +403,39 @@ internal static class Program
             }, allowSelf: true);
             if (Marshal.ReadInt32(address) != 0x10203040)
                 throw new InvalidOperationException("Restore selftest failed");
+            // Pure scan assertions: normal alignment cannot see a packed
+            // value at +3, deep scanning can, and a candidate spanning the
+            // primary-chunk boundary is reported exactly once.
+            var probe = new byte[24];
+            var packed = new byte[] { 0x91, 0xA3, 0xB5, 0xC7 };
+            packed.AsSpan().CopyTo(probe.AsSpan(3));
+            packed.AsSpan().CopyTo(probe.AsSpan(12));
+            var normalHits = new List<string>();
+            if (AddMatches(probe, packed, 0x10000, 4, 20, 24,
+                    normalHits, 5000) ||
+                normalHits.Count != 1 || normalHits[0] != "0x1000C")
+                throw new InvalidOperationException("Aligned scan matched wrong addresses");
+            var deepHits = new List<string>();
+            if (AddMatches(probe, packed, 0x10000, 1, 20, 24,
+                    deepHits, 5000) ||
+                deepHits.Count != 2 ||
+                deepHits[0] != "0x10003" || deepHits[1] != "0x1000C")
+                throw new InvalidOperationException("Bytewise scan missed packed value");
+            var overlap = new byte[12];
+            packed.AsSpan().CopyTo(overlap.AsSpan(7));
+            var boundaryHits = new List<string>();
+            if (AddMatches(overlap, packed, 0x10000, 1, 8, 11,
+                    boundaryHits, 5000) ||
+                boundaryHits.Count != 1 || boundaryHits[0] != "0x10007")
+                throw new InvalidOperationException("Cross-chunk numeric match failed");
+            // The start of the next chunk must not appear in this one.
+            var nextChunkStart = new byte[12];
+            packed.AsSpan().CopyTo(nextChunkStart.AsSpan(8));
+            var duplicates = new List<string>();
+            if (AddMatches(nextChunkStart, packed, 0x10000, 1, 8, 12,
+                    duplicates, 5000) || duplicates.Count != 0)
+                throw new InvalidOperationException("Scan repeated next-chunk address");
+
             if (!MatchesComparison("i32", "250",
                     Encode("i32", "400"), "all", out var snapshot) ||
                 snapshot != "400")
@@ -408,7 +459,7 @@ internal static class Program
                     Encode("i32", "7331"), "changed", out _))
                 throw new InvalidOperationException("Changed comparison returned false positive");
             return new { ok = true, selfTest =
-                "read, guarded write, readback, restore, relative comparison" };
+                "read, guarded write, readback, restore, relative comparison, bytewise/aligned boundary matching" };
         }
         finally { Marshal.FreeHGlobal(address); }
     }

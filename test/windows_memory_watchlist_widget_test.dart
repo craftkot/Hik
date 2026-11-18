@@ -8,6 +8,8 @@ import 'package:game_lab/widgets/live_memory_panel.dart';
 class _MockWindowsMemory extends WindowsLiveMemoryService {
   int snapshotCalls = 0;
   int writeCalls = 0;
+  bool? lastBytewise;
+  int? lastBudgetMiB;
 
   @override
   Future<List<LiveGameProcess>> processes() async => const [
@@ -21,8 +23,11 @@ class _MockWindowsMemory extends WindowsLiveMemoryService {
     required LiveValueFormat format,
     int budgetMiB = 512,
     int maxResults = 3000,
+    bool bytewise = false,
   }) async {
     expect(pid, 4242);
+    lastBytewise = bytewise;
+    lastBudgetMiB = budgetMiB;
     return const LiveMemoryScan(
       addresses: ['0x123456'], scannedBytes: 4096,
       truncated: false, regions: 1);
@@ -60,6 +65,43 @@ class _MockWindowsMemory extends WindowsLiveMemoryService {
 }
 
 void main() {
+  testWidgets('deep RAM scan uses bytewise offset with a 512 MiB ceiling',
+      (tester) async {
+    if (!Platform.isWindows) return;
+    tester.view.physicalSize = const Size(1600, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final service = _MockWindowsMemory();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SingleChildScrollView(
+        child: LiveMemoryPanel(service: service),
+      )),
+    ));
+    await tester.tap(find.text('Найти окна'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<int>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('TestGame.exe').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField,
+        'Текущее число из игры, например 120'), '100');
+
+    final deepSwitch = find.byKey(const Key('bytewise-ram-scan-toggle'));
+    await tester.ensureVisible(deepSwitch);
+    await tester.tap(deepSwitch);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Глубокий поиск:'), findsOneWidget);
+    final slider = tester.widget<Slider>(find.byType(Slider));
+    expect(slider.max, 512);
+    await tester.tap(find.text('Первый поиск'));
+    await tester.pumpAndSettle();
+    expect(service.lastBytewise, isTrue);
+    expect(service.lastBudgetMiB, lessThanOrEqualTo(512));
+    expect(service.writeCalls, 0);
+  });
+
   testWidgets('watchlist polls only pinned RAM candidates without any writes',
       (tester) async {
     if (!Platform.isWindows) return;

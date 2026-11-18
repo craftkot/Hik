@@ -37,6 +37,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
   String _watchStatus = '';
   LiveChangeMode _changeMode = LiveChangeMode.changed;
   int _budgetMiB = 512;
+  bool _bytewiseScan = false;
   bool _busy = false;
   String _status = 'Выбери окно своей одиночной игры и введи число HP, маны или денег.';
 
@@ -255,14 +256,17 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
           ? await _service.refine(pid: game.pid, format: _format,
               value: number, addresses: previous!.addresses)
           : await _service.scan(pid: game.pid, format: _format,
-              value: number, budgetMiB: _budgetMiB);
+              value: number, budgetMiB: _budgetMiB,
+              bytewise: _bytewiseScan);
       if (!mounted || game.pid != _selected?.pid) return;
       setState(() {
         _result = result; _lastPatch = null;
         _snapshots = {for (final address in result.addresses) address: number};
         _status = result.addresses.isEmpty
-            ? 'Совпадений нет. Попробуй другой числовой тип.'
+            ? 'Совпадений нет. Попробуй другой формат или '
+              'побайтовый поиск.'
             : 'Кандидатов: ${result.addresses.length}. '
+              '${_bytewiseScan ? 'Режим: побайтовый. ' : ''}'
               '${result.truncated ? 'Достигнут лимит результатов. ' : ''}'
               'Измени число в игре, введи новое и нажми «Уточнить».';
       });
@@ -503,13 +507,42 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
             Row(children: [
               const Text('Лимит RAM', style: TextStyle(color: _muted, fontSize: 11)),
               Expanded(child: Slider(
-                value: _budgetMiB.toDouble(), min: 128, max: 2048, divisions: 15,
+                value: _budgetMiB.toDouble(), min: 128,
+                max: _bytewiseScan ? 512 : 2048,
+                divisions: _bytewiseScan ? 12 : 15,
                 label: '$_budgetMiB МиБ',
                 onChanged: _busy ? null : (v) =>
                     setState(() => _budgetMiB = v.round()))),
               SizedBox(width: 70, child: Text('$_budgetMiB МиБ',
                 style: const TextStyle(fontSize: 11))),
             ]),
+            Material(
+              color: Colors.transparent,
+              child: SwitchListTile(
+              key: const Key('bytewise-ram-scan-toggle'),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('Глубокий поиск · каждый байт',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              subtitle: const Text(
+                'Проверяет также невыравненные адреса. Медленнее обычного '
+                'поиска; максимум 512 МиБ за запуск. Только первый поиск.',
+                style: TextStyle(color: _muted, fontSize: 11)),
+              value: _bytewiseScan,
+              onChanged: _busy ? null : (enabled) => setState(() {
+                _bytewiseScan = enabled;
+                if (enabled && _budgetMiB > 512) _budgetMiB = 512;
+                _result = null;
+                _snapshots = const {};
+                _lastPatch = null;
+                _clearWatch();
+                _status = enabled
+                    ? 'Глубокий поиск: проверяются все смещения байт. '
+                      'Для первого сканирования ограничение 512 МиБ.'
+                    : 'Обычный поиск: быстрее, выравнивание по размеру числа.';
+              }),
+              ),
+            ),
             Wrap(spacing: 8, runSpacing: 8, children: [
               FilledButton.icon(
                 onPressed: _busy || _selected == null ? null : () => _search(false),

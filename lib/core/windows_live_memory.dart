@@ -184,10 +184,19 @@ class WindowsLiveMemoryService {
     required LiveValueFormat format,
     int budgetMiB = 512,
     int maxResults = 3000,
+    bool bytewise = false,
   }) async {
     validateValue(value, format);
     if (budgetMiB < 16 || budgetMiB > 2048) {
       throw RangeError('Допустимо 16–2048 МиБ');
+    }
+    if (maxResults < 1 || maxResults > 5000) {
+      throw RangeError('Допустимо 1–5000 совпадений');
+    }
+    // Unaligned scanning checks each byte offset instead of only every
+    // fourth/eighth address. Keep the extra CPU cost bounded.
+    if (bytewise && budgetMiB > 512) {
+      throw RangeError('Для побайтового поиска максимум 512 МиБ');
     }
     final response = await _request({
       'command': 'scan',
@@ -196,7 +205,7 @@ class WindowsLiveMemoryService {
       'value': value.replaceAll(',', '.'),
       'maxBytes': budgetMiB * 1024 * 1024,
       'maxResults': maxResults,
-      'alignment': format.width,
+      'alignment': bytewise ? 1 : format.width,
     });
     return LiveMemoryScan.fromJson(response);
   }
