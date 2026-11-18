@@ -1075,10 +1075,13 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     child: Row(children: [
       if (!compact) Expanded(child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [Text(_section.title, style: const TextStyle(
+        children: [Text(_section.title, maxLines: 1,
+          overflow: TextOverflow.ellipsis, style: const TextStyle(
           fontSize: 23, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text(_section.detail, style: const TextStyle(fontSize: 12, color: _muted))],
+          Text(_section.detail, maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: _muted))],
       )),
       if (compact) Expanded(child: Text(_section.title, maxLines: 2,
         style: const TextStyle(fontWeight: FontWeight.w700))),
