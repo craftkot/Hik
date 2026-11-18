@@ -453,6 +453,8 @@ internal sealed class OverlayForm : Form
             });
             _expected = restore.Before; _value.Text = restore.Before;
             _baselines = new List<string> { restore.Before };
+            ShowCandidates();
+            _addresses.SelectedIndex = _hits.Count == 1 ? 0 : -1;
             _undo = null;
             _status.Text = "Прежнее значение восстановлено и проверено.";
         }
