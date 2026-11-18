@@ -870,7 +870,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             if (Platform.isAndroid && _storage is AndroidGameStorage &&
                 _section != Workspace.cheats)
               AndroidAllFilesAccessBanner(
-                storage: _storage as AndroidGameStorage),
+                storage: _storage),
             Expanded(child: Padding(
               padding: EdgeInsets.all(compact ? 10 : 20),
               child: _section == Workspace.cheats
