@@ -200,11 +200,38 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       });
       await _scan();
       if (mounted && _files.isEmpty) {
-        _message('Не нашли доступные файлы игры. Android закрывает '
-            'приватные сейвы; попробуй ручной выбор разрешённой папки.');
+        _message('Сейвы пока не найдены. Нажми значок папки, '
+            'чтобы один раз разрешить доступ к папке этой игры.');
       }
     } catch (error) {
       _message('Не удалось получить список приложений: $error');
+    }
+  }
+
+  Future<void> _grantAndroidGameFolder() async {
+    final selected = _selectedApp;
+    if (selected == null || _storage is! AndroidGameStorage) {
+      await _chooseFolder();
+      return;
+    }
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки');
+      return;
+    }
+    try {
+      // The system picker provides explicit access to one directory, which
+      // is then safely remembered for this particular game.
+      final folder = await _storage.chooseFolder();
+      if (folder == null || !mounted) return;
+      await (_storage as AndroidGameStorage).linkFolderToApp(selected, folder);
+      if (!mounted) return;
+      await _scan();
+      if (mounted && _files.isEmpty) {
+        _message('Папка доступна, но файлов не найдено. '
+            'Попробуй другую общую папку игры.');
+      }
+    } catch (error) {
+      _message('Не удалось связать папку с игрой: $error');
     }
   }
 
@@ -950,8 +977,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
       if (Platform.isAndroid)
-        IconButton(onPressed: _loading ? null : _chooseFolder,
-          tooltip: 'Вручную выбрать доступную папку (резервный вариант)',
+        IconButton(onPressed: _loading ? null :
+            (_selectedApp == null ? _chooseFolder : _grantAndroidGameFolder),
+          tooltip: _selectedApp == null
+              ? 'Вручную открыть папку игры'
+              : 'Один раз предоставить доступ к папке выбранной игры',
           icon: const Icon(Icons.folder_open_outlined)),
       const SizedBox(width: 6),
       FilledButton.icon(
@@ -1014,8 +1044,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                       : 'Файлы не найдены',
                   _selectedApp != null
                       ? 'Проверены только ранее разрешённые папки. '
-                          'Приватные данные Android недоступны; для других '
-                          'файлов используй кнопку папки вверху.'
+                          'Нажми значок папки сверху, чтобы привязать ещё '
+                          'один доступный каталог к этой игре. Приватные '
+                          'данные Android недоступны.'
                       : 'Проверь путь или выбери другую функцию слева.')
               : ListView.builder(itemCount: items.length,
                   itemBuilder: (context, index) {
