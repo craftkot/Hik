@@ -8,6 +8,9 @@ java = root / 'android/app/src/main/kotlin/com/ehtid/game_lab'
 java.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(root / 'android_native/MainActivity.kt', java / 'MainActivity.kt')
 shutil.copyfile(root / 'android_native/OverlayService.kt', java / 'OverlayService.kt')
+for extra in ('ContainerStore.kt', 'ContainerWebGameActivity.kt',
+              'ContainerApkProvider.kt'):
+    shutil.copyfile(root / 'android_native' / extra, java / extra)
 
 manifest = root / 'android/app/src/main/AndroidManifest.xml'
 content = manifest.read_text(encoding='utf-8')
@@ -29,6 +32,8 @@ for permission in (
     'android.permission.POST_NOTIFICATIONS',
     # Special app access on Android 11+; only the user may enable it in Settings.
     'android.permission.MANAGE_EXTERNAL_STORAGE',
+    # Required only to hand a user-approved APK to the system installer.
+    'android.permission.REQUEST_INSTALL_PACKAGES',
 ):
     if f'android:name="{permission}"' not in content:
         content = content.replace(
@@ -47,6 +52,18 @@ service = """    <service
 """
 if 'android:name=".OverlayService"' not in content:
     content = content.replace('</application>', service + '    </application>', 1)
+container_components = """    <activity
+        android:name=".ContainerWebGameActivity"
+        android:exported="false" />
+    <provider
+        android:name=".ContainerApkProvider"
+        android:authorities="com.ehtid.game_lab.containerapks"
+        android:exported="false"
+        android:grantUriPermissions="true" />
+"""
+if 'android:name=".ContainerWebGameActivity"' not in content:
+    content = content.replace('</application>',
+                              container_components + '    </application>', 1)
 manifest.write_text(content, encoding='utf-8')
 
 # Reuse the original EHTID icon instead of the stock Flutter launcher logo.

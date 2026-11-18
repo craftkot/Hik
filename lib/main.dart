@@ -25,6 +25,7 @@ import 'widgets/installed_app_picker.dart';
 import 'widgets/android_floating_panel.dart';
 import 'widgets/android_game_translation_panel.dart';
 import 'widgets/android_all_files_access_banner.dart';
+import 'widgets/android_container_lab.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 
@@ -37,7 +38,7 @@ const _accent = Color(0xFFB68BFF);
 const _cyanAccent = Color(0xFF5EE9F5);
 const _muted = Color(0xFFAAA5BE);
 
-enum Workspace { preloads, saves, localize, cheats }
+enum Workspace { preloads, saves, localize, cheats, container }
 
 extension WorkspaceInfo on Workspace {
   String get title => switch (this) {
@@ -45,18 +46,21 @@ extension WorkspaceInfo on Workspace {
     Workspace.saves => 'Редактор сохранений',
     Workspace.localize => 'Перевод игры',
     Workspace.cheats => 'Читы (соло)',
+    Workspace.container => 'Контейнер игр',
   };
   String get detail => switch (this) {
     Workspace.preloads => 'Просмотр ресурсов и распознанных файлов',
     Workspace.saves => 'Редактирование доступных текстовых сейвов',
     Workspace.localize => 'Локализация без изменения ключей JSON',
     Workspace.cheats => 'Windows RAM · поиск и изменение значений в офлайн-играх',
+    Workspace.container => 'Тест: игры внутри EHTID и импорт APK',
   };
   IconData get icon => switch (this) {
     Workspace.preloads => Icons.folder_zip_outlined,
     Workspace.saves => Icons.save_as_outlined,
     Workspace.localize => Icons.translate,
     Workspace.cheats => Icons.memory_outlined,
+    Workspace.container => Icons.inventory_2_outlined,
   };
 }
 
@@ -516,6 +520,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         Workspace.localize => f.isLocalization ||
             GameLocaleCandidates.canTranslate(f),
         Workspace.cheats => false,
+        Workspace.container => false,
       };
       return inSection && f.relativePath.toLowerCase().contains(search);
     }).toList();
@@ -924,7 +929,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       const Divider(height: 1, color: Color(0xFF2D293C)),
       const SizedBox(height: 20),
       for (final section in Workspace.values)
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        if (Platform.isAndroid || section != Workspace.container)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           child: Tooltip(message: section.title,
             child: Material(color: _section == section ? _panelLight : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
@@ -994,9 +1000,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             tooltip: 'Добавить папку с сейвами',
             icon: const Icon(Icons.create_new_folder_outlined)),
       ],
-      IconButton(onPressed: _loading || _folder == null ? null : _scan,
+      if (_section != Workspace.container)
+        IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
-      if (Platform.isAndroid) ...[
+      if (Platform.isAndroid && _section != Workspace.container) ...[
         if (_selectedApp != null)
           IconButton(
             onPressed: _loading ? null : _grantAndroidGameFolder,
@@ -1009,15 +1016,20 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           icon: const Icon(Icons.sports_esports_outlined),
         ),
       ],
-      const SizedBox(width: 6),
-      FilledButton.icon(
+      if (_section != Workspace.container) const SizedBox(width: 6),
+      if (_section != Workspace.container)
+        FilledButton.icon(
           onPressed: _loading ? null : _chooseFolder,
           icon: const Icon(Icons.folder_open_outlined, size: 18),
-          label: Text(compact ? 'Папка' : 'Выбрать папку игры')),
+          label: Text(compact ? 'Папка' : (Platform.isAndroid
+              ? 'Выбрать папку игры' : 'Открыть папку игры'))),
     ]),
   );
 
   Widget _workspaceView(bool compact) {
+    if (Platform.isAndroid && _section == Workspace.container) {
+      return const AndroidContainerLab();
+    }
     final narrow = compact || MediaQuery.sizeOf(context).width < 1000;
     if (narrow && _mobilePreview && _selected != null) return _detailView(narrow: true);
     if (Platform.isAndroid && _section == Workspace.localize) {
@@ -1363,7 +1375,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.11 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.12 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 

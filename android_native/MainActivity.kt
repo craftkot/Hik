@@ -27,6 +27,8 @@ class MainActivity : FlutterActivity() {
     private val pickFolderCode = 8812
     private val maxFileSize = 8L * 1024 * 1024
     private var pendingPicker: MethodChannel.Result? = null
+    private val containerPickCode = 8820
+    private var pendingContainerPicker: MethodChannel.Result? = null
 
     // A document ID alone is NOT a unique locator across different SAF trees.
     // Cache the exact document URI and its originating tree/parent/name together.
@@ -73,6 +75,57 @@ class MainActivity : FlutterActivity() {
                     result.error("overlay", exception.message ?: "Overlay unavailable", null)
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
+            "ehtid.gamelab/container").setMethodCallHandler { call, reply ->
+            try {
+                val store = ContainerStore(this)
+                when (call.method) {
+                    "list" -> reply.success(store.list())
+                    "createDemo" -> reply.success(store.createDemo())
+                    "import" -> {
+                        if (pendingContainerPicker != null) {
+                            reply.error("busy", "Import picker already active", null)
+                        } else {
+                            pendingContainerPicker = reply
+                            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "*/*"
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            try {
+                                startActivityForResult(intent, containerPickCode)
+                            } catch (error: Exception) {
+                                pendingContainerPicker = null
+                                reply.error("picker", error.message, null)
+                            }
+                        }
+                    }
+                    "run" -> {
+                        val id = call.argument<String>("id") ?: error("Missing game ID")
+                        check(store.isWeb(id)) { "APK cannot run inside this container" }
+                        startActivity(Intent(this, ContainerWebGameActivity::class.java)
+                            .putExtra("gameId", id))
+                        reply.success("web_started")
+                    }
+                    "install" -> {
+                        val id = call.argument<String>("id") ?: error("Missing game ID")
+                        reply.success(store.installApk(id))
+                    }
+                    "launchExternal" -> {
+                        val id = call.argument<String>("id") ?: error("Missing game ID")
+                        reply.success(store.launchExternalApk(id))
+                    }
+                    "remove" -> {
+                        val id = call.argument<String>("id") ?: error("Missing game ID")
+                        store.remove(id)
+                        reply.success(true)
+                    }
+                    else -> reply.notImplemented()
+                }
+            } catch (error: Exception) {
+                reply.error("container", error.message ?: "Container error", null)
+            }
+        }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, reply ->
                 try {
@@ -227,6 +280,28 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Uses Storage Access Framework picker result")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == containerPickCode) {
+            val response = pendingContainerPicker
+            pendingContainerPicker = null
+            val uri = data?.data
+            if (resultCode != Activity.RESULT_OK || uri == null) {
+                response?.success(null)
+            } else {
+                // ZIP extraction and APK copying may take seconds. Do not
+                // block Flutter's Android UI thread while importing.
+                Thread {
+                    try {
+                        val imported = ContainerStore(this).import(uri)
+                        runOnUiThread { response?.success(imported) }
+                    } catch (error: Exception) {
+                        runOnUiThread {
+                            response?.error("import", error.message ?: "Import failed", null)
+                        }
+                    }
+                }.start()
+            }
+            return
+        }
         if (requestCode != pickFolderCode) return
         val result = pendingPicker
         pendingPicker = null
