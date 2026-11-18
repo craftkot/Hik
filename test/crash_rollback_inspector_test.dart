@@ -72,4 +72,25 @@ void main() {
     await expectLater(CrashRollbackInspector.inspect(save), throwsStateError);
     expect(await target.readAsBytes(), data('old'));
   });
+  test('allows exactly the bounded number of rollback candidates', () async {
+    for (var i = 0; i < CrashRollbackInspector.maxCandidates; i++) {
+      await File('${save.path}.ehtid-rollback-$i.tmp')
+          .writeAsBytes(data('old'));
+    }
+    final previews = await CrashRollbackInspector.inspect(save);
+    expect(previews, hasLength(CrashRollbackInspector.maxCandidates));
+    expect(await save.readAsBytes(), data('new'));
+  });
+
+  test('rejects excess rollback candidates without modifying files', () async {
+    for (var i = 0; i <= CrashRollbackInspector.maxCandidates; i++) {
+      await File('${save.path}.ehtid-rollback-$i.tmp')
+          .writeAsBytes(data('old'));
+    }
+    await expectLater(CrashRollbackInspector.inspect(save), throwsStateError);
+    expect(await save.readAsBytes(), data('new'));
+    expect(await File('${save.path}.ehtid-rollback-0.tmp').readAsBytes(),
+        data('old'));
+  });
+
 }

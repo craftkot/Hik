@@ -28,6 +28,9 @@ class CrashRollbackPreview {
 }
 
 class CrashRollbackInspector {
+  /// Avoid retaining an unbounded number of 8 MiB snapshots in memory.
+  static const int maxCandidates = 32;
+
   /// Returns previews only for regular, bounded rollback files belonging
   /// to [save]. Symlinks and oversized files are rejected, not followed.
   static Future<List<CrashRollbackPreview>> inspect(File save) async {
@@ -55,6 +58,9 @@ class CrashRollbackInspector {
       if (await FileSystemEntity.type(entity.path, followLinks: false) !=
           FileSystemEntityType.file) {
         throw StateError('Аварийный файл не является обычным файлом: ${entity.path}');
+      }
+      if (result.length >= maxCandidates) {
+        throw StateError('Слишком много аварийных файлов (максимум $maxCandidates)');
       }
       final candidate = File(entity.path);
       if (await candidate.length() > SafeDesktopSaveWriter.maxLength) {
