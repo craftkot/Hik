@@ -24,6 +24,27 @@ void main() {
     expect(translator.translated, 1);
   });
 
+  test('Japanese, Chinese and Korean can translate; Russian is skipped',
+      () async {
+    final inputs = <String>[];
+    final translator = LocaleTranslator(
+      target: 'ru',
+      translateText: (text) async {
+        inputs.add(text);
+        return 'Переведено';
+      },
+    );
+    final output = jsonDecode(await translator.translateJson(
+      '{"jp":"こんにちは","cn":"你好","kr":"안녕하세요","ru":"Привет"}'))
+      as Map<String, dynamic>;
+    expect(translator.translated, 3);
+    expect(inputs, ['こんにちは', '你好', '안녕하세요']);
+    expect(output['jp'], 'Переведено');
+    expect(output['cn'], 'Переведено');
+    expect(output['kr'], 'Переведено');
+    expect(output['ru'], 'Привет');
+  });
+
   test('missing placeholder aborts translation before file changes',
       () async {
     final translator = LocaleTranslator(
