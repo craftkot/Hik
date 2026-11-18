@@ -14,7 +14,6 @@ void main() {
 
   late Directory dir;
   late File save;
-  late File backup;
   late Uint8List original;
   late Uint8List modified;
 
@@ -24,8 +23,8 @@ void main() {
     original = data('hp=120');
     modified = data('hp=999');
     await save.writeAsBytes(original, flush: true);
-    backup = File(await SafeDesktopSaveWriter()
-        .write(save, modified, expected: original));
+    await SafeDesktopSaveWriter()
+        .write(save, modified, expected: original);
   });
 
   tearDown(() async {
