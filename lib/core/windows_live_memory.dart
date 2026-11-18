@@ -162,6 +162,12 @@ class WindowsLiveMemoryService {
       if (parsed == null || !parsed.isFinite) {
         throw const FormatException('Нужно конечное дробное число');
       }
+      // Parsing a tiny nonzero decimal can already underflow to double zero.
+      // Never send that zero to the native helper as if it were intentional.
+      final mantissa = normalized.split(RegExp(r'[eE]')).first;
+      if (parsed == 0 && RegExp(r'[1-9]').hasMatch(mantissa)) {
+        throw const FormatException('Число слишком мало для представления');
+      }
       if (format == LiveValueFormat.float32) {
         // Reject nonzero values that round to zero in the native Float32 format.
         if (parsed.abs() > 3.4028235e38 ||
