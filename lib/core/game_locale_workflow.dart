@@ -66,8 +66,8 @@ class GameLocaleCandidates {
     }
     return file.isLocalization ||
         RegExp(r'^(strings|dialogue|dialog|translations|locale|localization)'
-            r'([._-][a-z0-9_-]+)?\\.json$').hasMatch(name) ||
-        RegExp(r'^(en|en-us|en_us|english)([._-].+)?\\.json$')
+            r'([._-][a-z0-9_-]+)?\.json$').hasMatch(name) ||
+        RegExp(r'^(en|en-us|en_us|english)([._-].+)?\.json$')
             .hasMatch(name);
   }
 
@@ -75,7 +75,7 @@ class GameLocaleCandidates {
     final candidates = files.where(canTranslate).toList();
     int score(GameFile file) {
       final path = file.relativePath.toLowerCase();
-      if (RegExp(r'(en[-_]?(us|gb)?|english)\\.json$')
+      if (RegExp(r'(en[-_]?(us|gb)?|english)\.json$')
           .hasMatch(file.name.toLowerCase())) return 0;
       if (path.contains('/lang/') || path.contains('/locales/') ||
           path.contains('/localization/') || path.contains('/i18n/')) {
