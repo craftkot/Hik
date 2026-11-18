@@ -110,10 +110,19 @@ class DesktopGameStorage implements GameStorage {
 
   @override
   Future<Uint8List> read(GameFile file) async {
-    if (file.size > maxEditableBytes) {
-      throw StateError('Файл больше 8 МБ: отображение отключено');
+    final source = File(file.id);
+    // The size recorded during scanning can be stale if the game rewrites
+    // the save. Read at most the editing limit plus one byte.
+    final reader = await source.open();
+    try {
+      final bytes = await reader.read(maxEditableBytes + 1);
+      if (bytes.length > maxEditableBytes) {
+        throw StateError('Файл больше 8 МБ: отображение отключено');
+      }
+      return Uint8List.fromList(bytes);
+    } finally {
+      await reader.close();
     }
-    return File(file.id).readAsBytes();
   }
 
   @override
