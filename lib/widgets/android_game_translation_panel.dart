@@ -17,6 +17,7 @@ class AndroidGameTranslationPanel extends StatefulWidget {
     required this.chooseGame,
     required this.grantFolder,
     required this.refreshFiles,
+    this.hasUnsavedChanges = false,
   });
 
   final GameStorage storage;
@@ -25,6 +26,7 @@ class AndroidGameTranslationPanel extends StatefulWidget {
   final Future<void> Function() chooseGame;
   final Future<void> Function() grantFolder;
   final Future<void> Function() refreshFiles;
+  final bool hasUnsavedChanges;
 
   @override
   State<AndroidGameTranslationPanel> createState() =>
@@ -57,6 +59,10 @@ class _AndroidGameTranslationPanelState
 
   Future<void> _prepare() async {
     if (_busy) return;
+    if (widget.hasUnsavedChanges) {
+      _notice('Сначала сохрани или отмени несохранённые изменения');
+      return;
+    }
     if (widget.gameName == null) {
       await widget.chooseGame();
       return;
