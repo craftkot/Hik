@@ -121,7 +121,7 @@ class MainActivity : FlutterActivity() {
                                 ?: error("Missing package")
                             val uri = Uri.parse(call.argument<String>("uri")
                                 ?: error("Missing tree URI"))
-                            if (!Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\\\.[a-zA-Z0-9_]+)+\\$").matches(pkg)) {
+                            if (!Regex("""^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+$""").matches(pkg)) {
                                 error("Invalid package")
                             }
                             // Only a root explicitly granted by the user may
