@@ -1006,17 +1006,19 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     if (narrow && _mobilePreview && _selected != null) return _detailView(narrow: true);
     if (Platform.isAndroid && _section == Workspace.localize) {
       return Column(children: [
-        AndroidGameTranslationPanel(
-          storage: _storage,
-          files: _files,
-          gameName: _selectedApp?.label,
-          chooseGame: _chooseInstalledApp,
-          grantFolder: _selectedApp == null
-              ? _chooseFolder : _grantAndroidGameFolder,
-          refreshFiles: _scan,
-        ),
-        const SizedBox(height: 10),
-        Expanded(child: _fileList()),
+        Flexible(flex: 3, child: SingleChildScrollView(
+          child: AndroidGameTranslationPanel(
+            storage: _storage,
+            files: _files,
+            gameName: _selectedApp?.label,
+            chooseGame: _chooseInstalledApp,
+            grantFolder: _selectedApp == null
+                ? _chooseFolder : _grantAndroidGameFolder,
+            refreshFiles: _scan,
+          ),
+        )),
+        const SizedBox(height: 8),
+        Expanded(flex: 2, child: _fileList()),
       ]);
     }
     if (narrow) return _fileList();
