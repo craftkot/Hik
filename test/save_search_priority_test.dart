@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -34,7 +35,7 @@ void main() {
       relativePath: 'Saves/slot.sav', size: source.length,
     );
     final report = await GameValueSearch.search(
-      storage: _SearchStorage({'save': Uint8List.fromList(source.codeUnits)}),
+      storage: _SearchStorage({'save': Uint8List.fromList(utf8.encode(source))}),
       files: [file], query: '100',
     );
     expect(report.hits, hasLength(6));
@@ -66,7 +67,7 @@ void main() {
     );
     final report = await GameValueSearch.search(
       storage: _SearchStorage({
-        'text': Uint8List.fromList(source.codeUnits),
+        'text': Uint8List.fromList(utf8.encode(source)),
         'blob': blob,
       }),
       files: [textFile, binaryFile],
@@ -82,7 +83,7 @@ void main() {
     final file = GameFile(id: 'ru', name: 'data.json',
       relativePath: 'save/data.json', size: source.length);
     final result = await GameValueSearch.search(
-      storage: _SearchStorage({'ru': Uint8List.fromList(source.codeUnits)}),
+      storage: _SearchStorage({'ru': Uint8List.fromList(utf8.encode(source))}),
       files: [file], query: '120',
     );
     expect(GameValueSearch.prioritizeHits(result.hits)
