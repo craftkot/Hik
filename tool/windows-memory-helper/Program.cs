@@ -217,7 +217,7 @@ internal static class Program
         if (addresses.Length == 0 || addresses.Length > 5000 ||
             addresses.Length != baselines.Length)
             throw new ArgumentException("Expected 1..5000 addresses with matching baseline values");
-        if (request.Mode is not ("changed" or "unchanged" or "increased" or "decreased"))
+        if (request.Mode is not ("all" or "changed" or "unchanged" or "increased" or "decreased"))
             throw new ArgumentException("Unsupported comparison mode");
         var width = request.Format is "i32" or "f32" ? 4 :
             request.Format is "i64" or "f64" ? 8 :
@@ -310,6 +310,9 @@ internal static class Program
         }
         return mode switch
         {
+            // Read-only snapshot: retain every readable finite candidate,
+            // independently of the change against its old baseline.
+            "all" => true,
             "changed" => order != 0,
             "unchanged" => order == 0,
             "increased" => order > 0,
@@ -382,6 +385,13 @@ internal static class Program
             }, allowSelf: true);
             if (Marshal.ReadInt32(address) != 0x10203040)
                 throw new InvalidOperationException("Restore selftest failed");
+            if (!MatchesComparison("i32", "250",
+                    Encode("i32", "400"), "all", out var snapshot) ||
+                snapshot != "400")
+                throw new InvalidOperationException("Read-only snapshot failed");
+            if (!MatchesComparison("i32", "250",
+                    Encode("i32", "250"), "all", out _))
+                throw new InvalidOperationException("Unchanged snapshot failed");
             if (!MatchesComparison("i64", "9223372036854775806",
                     Encode("i64", "9223372036854775807"),
                     "increased", out var biggest) ||
