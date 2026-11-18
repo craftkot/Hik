@@ -35,6 +35,13 @@ void main() {
         '-1e-50', LiveValueFormat.float32), throwsFormatException);
     WindowsLiveMemoryService.validateValue('0', LiveValueFormat.float32);
     WindowsLiveMemoryService.validateValue('1e-44', LiveValueFormat.float32);
+    // Smallest Float32 subnormal must remain writable, including its sign.
+    WindowsLiveMemoryService.validateValue(
+        '1.401298464324817e-45', LiveValueFormat.float32);
+    WindowsLiveMemoryService.validateValue(
+        '-1.401298464324817e-45', LiveValueFormat.float32);
+    expect(() => WindowsLiveMemoryService.validateValue(
+        '1e-324', LiveValueFormat.float64), throwsFormatException);
     WindowsLiveMemoryService.validateValue('1e-46', LiveValueFormat.float64);
     expect(() => WindowsLiveMemoryService.validateValue(
         '1e-400', LiveValueFormat.float32), throwsFormatException);
