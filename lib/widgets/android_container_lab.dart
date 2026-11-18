@@ -13,20 +13,37 @@ class AndroidContainerLab extends StatefulWidget {
 class _AndroidContainerLabState extends State<AndroidContainerLab>
     with WidgetsBindingObserver {
   static const _channel = MethodChannel('ehtid.gamelab/container');
+  static const _progressChannel = MethodChannel(
+      'ehtid.gamelab/container_progress');
   List<Map<String, String>> _games = [];
   bool _busy = false;
+  bool _importing = false;
+  int _copiedBytes = 0;
+  int? _totalBytes;
   String _status = '';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _progressChannel.setMethodCallHandler((call) async {
+      if (call.method != 'importProgress' || !mounted) return;
+      final data = Map<Object?, Object?>.from(call.arguments as Map);
+      final copied = (data['copiedBytes'] as num?)?.toInt();
+      final total = (data['totalBytes'] as num?)?.toInt();
+      if (copied == null || copied < 0) return;
+      setState(() {
+        _copiedBytes = copied;
+        _totalBytes = total != null && total > 0 ? total : null;
+      });
+    });
     _refresh();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _progressChannel.setMethodCallHandler(null);
     super.dispose();
   }
 
@@ -60,7 +77,16 @@ class _AndroidContainerLabState extends State<AndroidContainerLab>
 
   Future<void> _call(String action, {String? id}) async {
     if (_busy) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      if (action == 'import') {
+        _importing = true;
+        _copiedBytes = 0;
+        _totalBytes = null;
+        _status = 'Выбери APK или ZIP. Большой файл будет скопирован '
+            'по частям, без загрузки целиком в память.';
+      }
+    });
     try {
       final result = await _channel.invokeMethod<dynamic>(
           action, id == null ? null : {'id': id});
@@ -95,7 +121,10 @@ class _AndroidContainerLabState extends State<AndroidContainerLab>
     } catch (error) {
       _notify('Ошибка: $error');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() {
+        _busy = false;
+        _importing = false;
+      });
     }
   }
 
@@ -118,6 +147,13 @@ class _AndroidContainerLabState extends State<AndroidContainerLab>
     if (approved != true || !mounted) return;
     await _call('remove', id: game['id']);
     if (mounted) _notify('Копия игры удалена из хранилища EHTID');
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} ГиБ';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МиБ';
   }
 
   @override
@@ -151,12 +187,29 @@ class _AndroidContainerLabState extends State<AndroidContainerLab>
         ),
       ]),
       const SizedBox(height: 7),
-      const Text('HTML5: ZIP с index.html в корне, до 50 МБ распаковки. '
-          'APK: один обычный APK, не XAPK/APKS и не split-пакет.',
+      const Text('HTML5: ZIP до 200 МиБ и 50 МиБ распаковки. '
+          'APK: до 8 ГиБ, потоковое копирование, требуется свободное '
+          'место для отдельной копии. XAPK/APKS и split-пакеты пока '
+          'не поддерживаются.',
         style: TextStyle(color: Color(0xFFAAA5BE), fontSize: 11)),
-      if (_busy) const Padding(
-        padding: EdgeInsets.symmetric(vertical: 12),
-        child: LinearProgressIndicator(),
+      if (_busy) Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          LinearProgressIndicator(
+            value: _importing && _totalBytes != null
+                ? (_copiedBytes / _totalBytes!).clamp(0.0, 1.0) : null,
+          ),
+          if (_importing) ...[
+            const SizedBox(height: 5),
+            Text(_totalBytes == null
+                ? 'Импорт: ${_formatBytes(_copiedBytes)} (размер неизвестен)'
+                : 'Скопировано ${_formatBytes(_copiedBytes)} '
+                    'из ${_formatBytes(_totalBytes!)} '
+                    '(${(_copiedBytes / _totalBytes! * 100).clamp(0, 100).toStringAsFixed(0)}%)',
+              style: const TextStyle(fontSize: 11,
+                color: Color(0xFF5EE9F5))),
+          ],
+        ]),
       ),
       if (_status.isNotEmpty) Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
