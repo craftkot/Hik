@@ -11,12 +11,24 @@ shutil.copyfile(root / 'android_native/OverlayService.kt', java / 'OverlayServic
 
 manifest = root / 'android/app/src/main/AndroidManifest.xml'
 content = manifest.read_text(encoding='utf-8')
+# Scoped package visibility: launcher-visible apps, not QUERY_ALL_PACKAGES.
+if '<queries>' not in content:
+    queries = """    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+"""
+    content = content.replace('<application', queries + '    <application', 1)
 for permission in (
     'android.permission.INTERNET',
     'android.permission.SYSTEM_ALERT_WINDOW',
     'android.permission.FOREGROUND_SERVICE',
     'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
     'android.permission.POST_NOTIFICATIONS',
+    # Special app access on Android 11+; only the user may enable it in Settings.
+    'android.permission.MANAGE_EXTERNAL_STORAGE',
 ):
     if f'android:name="{permission}"' not in content:
         content = content.replace(

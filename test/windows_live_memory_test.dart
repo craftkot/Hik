@@ -29,7 +29,6 @@ void main() {
         'Infinity', LiveValueFormat.float64), throwsFormatException);
     expect(() => WindowsLiveMemoryService.validateValue(
         '1e100', LiveValueFormat.float32), throwsFormatException);
-    // A non-zero Float32 value must not silently round down to zero.
     expect(() => WindowsLiveMemoryService.validateValue(
         '1e-46', LiveValueFormat.float32), throwsFormatException);
     expect(() => WindowsLiveMemoryService.validateValue(

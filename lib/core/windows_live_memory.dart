@@ -163,8 +163,7 @@ class WindowsLiveMemoryService {
         throw const FormatException('Нужно конечное дробное число');
       }
       if (format == LiveValueFormat.float32) {
-        // Prevent a non-zero user value from silently becoming zero when
-        // converted to the native 32-bit representation.
+        // Reject nonzero values that round to zero in the native Float32 format.
         if (parsed.abs() > 3.4028235e38 ||
             (parsed != 0 && parsed.abs() < 1.401298464324817e-45)) {
           throw const FormatException('Значение вне диапазона Float32');
