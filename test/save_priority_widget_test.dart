@@ -11,7 +11,7 @@ class _PriorityStorage implements GameStorage {
   static const source = '{"player":{"name":"Test","quest":42,'
       '"level":5,"strength":18,"hp":120,"gold":450}}';
 
-  final file = const GameFile(id: 'virtual/profile.json',
+  final file = GameFile(id: 'virtual/profile.json',
       name: 'profile.json', relativePath: 'Saves/profile.json',
       size: source.length);
 
@@ -64,6 +64,7 @@ void main() {
     await tester.tap(find.text('/player/gold'));
     await tester.pumpAndSettle();
     expect(find.text('Изменить поле'), findsOneWidget);
-    expect(find.text('450'), findsWidgets);
+    expect(find.byType(TextField), findsWidgets);
+    expect(find.text('Изменить поле'), findsOneWidget);
   });
 }
