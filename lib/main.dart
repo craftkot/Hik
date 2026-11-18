@@ -189,6 +189,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     try {
       final apps = await _storage.listInstalledApps();
       if (!mounted) return;
+      if (apps.isEmpty) {
+        _message('Android не показывает установленные игры. '
+            'Откроем ручной выбор папки.');
+        await _chooseFolder();
+        return;
+      }
       final chosen = await showInstalledAppPicker(context, apps);
       if (!mounted || chosen == null) return;
       _query.clear();
@@ -250,6 +256,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
+        _query.clear();
         _selected = null; _bytes = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
@@ -502,7 +509,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     final visible = _files.where((f) {
       final inSection = switch (_section) {
         Workspace.preloads => f.isLikelyPreload || (!f.isSave && !f.isLocalization),
-        Workspace.saves => _selectedApp != null || f.isSave,
+        // In Android manual-folder mode, unusual save extensions are common.
+        // Show every accessible file and let the user inspect it.
+        Workspace.saves => (Platform.isAndroid && _folder != null) || f.isSave,
         Workspace.localize => f.isLocalization ||
             GameLocaleCandidates.canTranslate(f),
         Workspace.cheats => false,
@@ -986,23 +995,24 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       ],
       IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
-      if (Platform.isAndroid)
-        IconButton(onPressed: _loading ? null :
-            (_selectedApp == null ? _chooseFolder : _grantAndroidGameFolder),
-          tooltip: _selectedApp == null
-              ? 'Вручную открыть папку игры'
-              : 'Один раз предоставить доступ к папке выбранной игры',
-          icon: const Icon(Icons.folder_open_outlined)),
+      if (Platform.isAndroid) ...[
+        if (_selectedApp != null)
+          IconButton(
+            onPressed: _loading ? null : _grantAndroidGameFolder,
+            tooltip: 'Привязать доступную папку к выбранной игре',
+            icon: const Icon(Icons.create_new_folder_outlined),
+          ),
+        IconButton(
+          onPressed: _loading ? null : _chooseInstalledApp,
+          tooltip: 'Выбрать установленную игру (дополнительный способ)',
+          icon: const Icon(Icons.sports_esports_outlined),
+        ),
+      ],
       const SizedBox(width: 6),
       FilledButton.icon(
-          onPressed: _loading ? null :
-              (Platform.isAndroid ? _chooseInstalledApp : _chooseFolder),
-          icon: Icon(Platform.isAndroid
-              ? Icons.sports_esports_outlined : Icons.folder_open_outlined,
-              size: 18),
-          label: Text(Platform.isAndroid
-              ? (compact ? 'Игра' : 'Выбрать игру')
-              : (compact ? 'Папка' : 'Открыть папку игры'))),
+          onPressed: _loading ? null : _chooseFolder,
+          icon: const Icon(Icons.folder_open_outlined, size: 18),
+          label: Text(compact ? 'Папка' : 'Выбрать папку игры')),
     ]),
   );
 
@@ -1016,6 +1026,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             storage: _storage,
             files: _files,
             gameName: _selectedApp?.label,
+            hasFolder: _folder != null,
             chooseGame: _chooseInstalledApp,
             grantFolder: _selectedApp == null
                 ? _chooseFolder : _grantAndroidGameFolder,
@@ -1063,8 +1074,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         const Divider(height: 1, color: Color(0xFF2D293C)),
         Expanded(child: _folder == null
             ? _emptyMessage(Icons.folder_open,
-                Platform.isAndroid ? 'Игра ещё не выбрана' : 'Папка ещё не выбрана',
-                Platform.isAndroid ? 'Нажми «Игра» в верхней панели.'
+                Platform.isAndroid ? 'Папка игры ещё не выбрана' : 'Папка ещё не выбрана',
+                Platform.isAndroid ? 'Нажми «Папка» сверху, чтобы открыть доступные файлы игры.'
                     : 'Открой папку игры — появятся доступные файлы.')
             : items.isEmpty
               ? _emptyMessage(Icons.manage_search,
@@ -1075,7 +1086,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                           'Нажми значок папки сверху, чтобы привязать ещё '
                           'один доступный каталог к этой игре. Приватные '
                           'данные Android недоступны.'
-                      : 'Проверь путь или выбери другую функцию слева.')
+                      : Platform.isAndroid
+                          ? 'В этой папке нет доступных файлов. Попробуй'
+                              ' другую общую папку игры. Android/data'
+                              ' и private data могут быть закрыты системой.'
+                          : 'Проверь путь или выбери другую функцию слева.')
               : ListView.builder(itemCount: items.length,
                   itemBuilder: (context, index) {
                     final file = items[index];
