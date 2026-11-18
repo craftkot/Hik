@@ -141,6 +141,7 @@ internal sealed class OverlayForm : Form
         _comparison.Width = 172; _comparison.BackColor = Panel;
         _comparison.ForeColor = Color.White;
         _comparison.Items.AddRange(new object[] {
+            new FormatItem("all", "Обновить показания"),
             new FormatItem("changed", "Изменилось"),
             new FormatItem("unchanged", "Не изменилось"),
             new FormatItem("increased", "Увеличилось"),
@@ -148,6 +149,7 @@ internal sealed class OverlayForm : Form
         });
         _comparison.SelectedIndex = 0;
         _compare.Width = 160;
+        _compare.Text = "Обновить / сравнить";
         _compare.Click += async (_, _) => await CompareCandidates();
         compareRow.Controls.Add(_comparison);
         compareRow.Controls.Add(_compare);
@@ -223,6 +225,19 @@ internal sealed class OverlayForm : Form
         _expected = null;
         _undo = null;
         UpdateButtons();
+    }
+
+    private void ShowCandidates()
+    {
+        _addresses.BeginUpdate();
+        try {
+            _addresses.Items.Clear();
+            for (int i = 0; i < _hits.Count; i++) {
+                string value = i < _baselines.Count ? _baselines[i] : "?";
+                _addresses.Items.Add(_hits[i] + "  |  " + value);
+            }
+        }
+        finally { _addresses.EndUpdate(); }
     }
 
     private void UpdateButtons()
@@ -337,8 +352,7 @@ internal sealed class OverlayForm : Form
             _hits = result.GetProperty("addresses").EnumerateArray()
                 .Select(x => x.GetString() ?? "").ToList();
             _baselines = Enumerable.Repeat(value, _hits.Count).ToList();
-            _addresses.Items.Clear();
-            _addresses.Items.AddRange(_hits.Cast<object>().ToArray());
+            ShowCandidates();
             _expected = value;
             _undo = null;
             var cap = result.TryGetProperty("truncated", out var truncated) &&
@@ -374,12 +388,14 @@ internal sealed class OverlayForm : Form
                 throw new InvalidOperationException("Scanned values and addresses are misaligned");
             _hits = addresses;
             _baselines = values;
-            _addresses.Items.Clear();
-            _addresses.Items.AddRange(_hits.Cast<object>().ToArray());
+            ShowCandidates();
             _expected = _baselines.Count == 1 ? _baselines[0] : null;
             _undo = null;
-            _status.Text = $"После «{mode}» осталось {_hits.Count} адресов. " +
-                "Фильтр можно повторять после изменений в игре.";
+            _status.Text = mode == "all"
+                ? $"Обновлены показания {_hits.Count} адресов; " +
+                  $"недоступных: {candidates.Length - _hits.Count}. Память не изменялась."
+                : $"После «{mode}» осталось {_hits.Count} адресов. " +
+                  "Фильтр можно повторять после изменений в игре.";
         }
         catch (Exception error) { _status.Text = error.Message; }
         finally { SetBusy(false); }
@@ -387,9 +403,12 @@ internal sealed class OverlayForm : Form
 
     private async Task WriteSelected()
     {
-        if (_busy || Pid is not int pid || _addresses.SelectedItem is not string address ||
-            _addresses.SelectedIndex < 0 || _addresses.SelectedIndex >= _baselines.Count)
+        if (_busy || Pid is not int pid ||
+            _addresses.SelectedIndex < 0 ||
+            _addresses.SelectedIndex >= _baselines.Count ||
+            _addresses.SelectedIndex >= _hits.Count)
             return;
+        string address = _hits[_addresses.SelectedIndex];
         var replacement = _replacement.Text.Trim().Replace(',', '.');
         if (!ValidNumber(replacement, Format)) {
             _status.Text = "Неверный формат нового значения"; return;
@@ -413,7 +432,7 @@ internal sealed class OverlayForm : Form
             _value.Text = replacement;
             _hits = new List<string> { address };
             _baselines = new List<string> { replacement };
-            _addresses.Items.Clear(); _addresses.Items.Add(address);
+            ShowCandidates();
             _addresses.SelectedIndex = 0;
             _status.Text = $"Записано и проверено: {address} · {expected} → {replacement}";
         }
