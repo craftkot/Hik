@@ -50,6 +50,26 @@ void main() {
     expect(calls, isNot(contains('install')));
   });
 
+  testWidgets('large APK import advertises streaming and storage guard',
+      (tester) async {
+    const channel = MethodChannel('ehtid.gamelab/container');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'list') return <dynamic>[];
+      return null;
+    });
+    addTearDown(() =>
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: AndroidContainerLab()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('APK: до 8 ГиБ'), findsOneWidget);
+    expect(find.textContaining('потоковое копирование'), findsOneWidget);
+    expect(find.text('Импорт ZIP / APK'), findsOneWidget);
+  });
+
   testWidgets('APK staging offers only Android system installation',
       (tester) async {
     final calls = <String>[];
