@@ -46,6 +46,18 @@ class AndroidGameStorage implements GameStorage {
   Future<List<String>> approvedFolders() async =>
       await _channel.invokeListMethod<String>('grantedFolders') ?? [];
 
+  /// One-time, explicit user-granted association survives app restarts.
+  Future<void> linkFolderToApp(InstalledGameApp app, String treeUri) async {
+    await _channel.invokeMethod<void>('linkGameFolder', {
+      'package': app.packageName, 'uri': treeUri,
+    });
+  }
+
+  Future<List<String>> _linkedFolders(InstalledGameApp app) async =>
+      await _channel.invokeListMethod<String>('linkedGameFolders', {
+        'package': app.packageName,
+      }) ?? [];
+
   @override
   Future<List<GameFile>> scan(String folder) async {
     if (Uri.tryParse(folder)?.scheme == 'ehtid-app') {
@@ -56,14 +68,17 @@ class AndroidGameStorage implements GameStorage {
 
   Future<List<GameFile>> discoverAppFiles(InstalledGameApp app) async {
     final roots = await approvedFolders();
+    if (roots.isEmpty) return [];
+    final linked = (await _linkedFolders(app)).toSet();
     final files = <String, GameFile>{};
-    // Discovery never requests a new permission or reads private app data.
-    // Skip failed/inaccessible grants but keep the other approved trees.
+    // Never request a new permission or read private app data.
+    // The user can explicitly associate a granted game directory with a
+    // package, even if its directory name has no obvious game identifier.
     for (final root in roots.take(12)) {
       try {
         final rows = await _scanTree(root);
         for (final file in rows) {
-          if (AndroidAppSaveDiscovery.matches(
+          if (linked.contains(root) || AndroidAppSaveDiscovery.matches(
               app: app, treeUri: root, relativePath: file.relativePath)) {
             files.putIfAbsent(file.id, () => file);
           }
