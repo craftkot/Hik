@@ -2,6 +2,8 @@ package com.ehtid.game_lab
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.net.Uri
@@ -73,6 +75,47 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, reply ->
                 try {
                     when (call.method) {
+                        "listInstalledApps" -> {
+                            // Visible launcher activities only. Android 11+ package
+                            // visibility is declared in the generated manifest.
+                            val launch = Intent(Intent.ACTION_MAIN)
+                                .addCategory(Intent.CATEGORY_LAUNCHER)
+                            @Suppress("DEPRECATION")
+                            val apps = if (Build.VERSION.SDK_INT >= 33) {
+                                packageManager.queryIntentActivities(
+                                    launch, PackageManager.ResolveInfoFlags.of(0L))
+                            } else {
+                                packageManager.queryIntentActivities(launch, 0)
+                            }
+                            val entries = apps.mapNotNull { resolved ->
+                                val pkg = resolved.activityInfo?.packageName
+                                    ?: return@mapNotNull null
+                                if (pkg == packageName) return@mapNotNull null
+                                val label = resolved.loadLabel(packageManager)
+                                    ?.toString()?.take(120)?.trim().orEmpty()
+                                if (label.isEmpty()) return@mapNotNull null
+                                @Suppress("DEPRECATION")
+                                val isGame = try {
+                                    Build.VERSION.SDK_INT >= 26 &&
+                                        packageManager.getApplicationInfo(pkg, 0)
+                                            .category == ApplicationInfo.CATEGORY_GAME
+                                } catch (_: PackageManager.NameNotFoundException) {
+                                    false
+                                }
+                                mapOf("package" to pkg, "label" to label,
+                                    "isGame" to isGame)
+                            }.distinctBy { it["package"] }
+                                .sortedWith(compareByDescending<Map<String, Any>> {
+                                    it["isGame"] == true
+                                }.thenBy { (it["label"] as String).lowercase() })
+                            reply.success(entries)
+                        }
+                        "grantedFolders" -> {
+                            reply.success(contentResolver.persistedUriPermissions
+                                .filter { it.isReadPermission &&
+                                    it.uri.scheme == "content" }
+                                .map { it.uri.toString() })
+                        }
                         "chooseFolder" -> {
                             if (pendingPicker != null) {
                                 reply.error("busy", "Folder picker is already open", null)
