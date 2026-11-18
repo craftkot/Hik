@@ -197,7 +197,8 @@ class _AndroidContainerLabState extends State<AndroidContainerLab>
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           LinearProgressIndicator(
             value: _importing && _totalBytes != null
-                ? (_copiedBytes / _totalBytes!).clamp(0.0, 1.0) : null,
+                ? (_copiedBytes / _totalBytes!).clamp(0.0, 1.0).toDouble()
+                : null,
           ),
           if (_importing) ...[
             const SizedBox(height: 5),
