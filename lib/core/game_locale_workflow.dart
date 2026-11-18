@@ -80,7 +80,7 @@ class GameLocaleCandidates {
       'pt', 'uk', 'pl', 'tr', 'nl', 'vi', 'th', 'ar',
     };
     final markers = file.relativePath.toLowerCase()
-        .split(RegExp(r'[/\\\\._-]+'))
+        .split(RegExp(r'[/._-]+'))
         .where(known.contains).toSet();
     return markers.isEmpty || (markers.length == 1 &&
         markers.contains(code));
