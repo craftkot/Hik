@@ -162,14 +162,13 @@ class WindowsLiveMemoryService {
       if (parsed == null || !parsed.isFinite) {
         throw const FormatException('Нужно конечное дробное число');
       }
-      // Parsing a tiny nonzero decimal can already underflow to double zero.
-      // Never send that zero to the native helper as if it were intentional.
+      // A nonzero decimal can underflow while parsing to a Dart double.
       final mantissa = normalized.split(RegExp(r'[eE]')).first;
       if (parsed == 0 && RegExp(r'[1-9]').hasMatch(mantissa)) {
         throw const FormatException('Число слишком мало для представления');
       }
       if (format == LiveValueFormat.float32) {
-        // Reject nonzero values that round to zero in the native Float32 format.
+        // Half of the smallest Float32 subnormal rounds to zero.
         if (parsed.abs() > 3.4028235e38 ||
             (parsed != 0 && parsed.abs() < 7.006492321624085e-46)) {
           throw const FormatException('Значение вне диапазона Float32');
@@ -193,10 +192,19 @@ class WindowsLiveMemoryService {
     required LiveValueFormat format,
     int budgetMiB = 512,
     int maxResults = 3000,
+    bool bytewise = false,
   }) async {
     validateValue(value, format);
     if (budgetMiB < 16 || budgetMiB > 2048) {
       throw RangeError('Допустимо 16–2048 МиБ');
+    }
+    if (maxResults < 1 || maxResults > 5000) {
+      throw RangeError('Допустимо 1–5000 совпадений');
+    }
+    // Unaligned scanning checks each byte offset instead of only every
+    // fourth/eighth address. Keep the extra CPU cost bounded.
+    if (bytewise && budgetMiB > 512) {
+      throw RangeError('Для побайтового поиска максимум 512 МиБ');
     }
     final response = await _request({
       'command': 'scan',
@@ -205,7 +213,7 @@ class WindowsLiveMemoryService {
       'value': value.replaceAll(',', '.'),
       'maxBytes': budgetMiB * 1024 * 1024,
       'maxResults': maxResults,
-      'alignment': format.width,
+      'alignment': bytewise ? 1 : format.width,
     });
     return LiveMemoryScan.fromJson(response);
   }

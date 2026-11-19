@@ -21,25 +21,55 @@ class EmptyStorage implements GameStorage {
 }
 
 void main() {
-  testWidgets('Android translator starts by choosing an app',
+  testWidgets('Android translator starts by choosing a folder',
       (tester) async {
-    var chosen = false;
+    var folderChosen = false;
+    var appChosen = false;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: SingleChildScrollView(
         child: AndroidGameTranslationPanel(
           storage: EmptyStorage(),
           files: const [],
           gameName: null,
-          chooseGame: () async { chosen = true; },
+          chooseGame: () async { appChosen = true; },
+          grantFolder: () async { folderChosen = true; },
+          refreshFiles: () async {},
+        ),
+      )),
+    ));
+    expect(find.text('Выбрать папку игры'), findsOneWidget);
+    await tester.tap(find.text('Выбрать папку игры'));
+    await tester.pumpAndSettle();
+    expect(folderChosen, isTrue);
+    expect(appChosen, isFalse);
+  });
+
+  testWidgets('manually granted folder can translate without app listing',
+      (tester) async {
+    const file = GameFile(
+      id: 'locale', name: 'en.json',
+      relativePath: 'locales/en.json', size: 25,
+    );
+    var appPickerOpened = false;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SingleChildScrollView(
+        child: AndroidGameTranslationPanel(
+          storage: EmptyStorage(),
+          files: const [file],
+          gameName: null,
+          hasFolder: true,
+          chooseGame: () async { appPickerOpened = true; },
           grantFolder: () async {},
           refreshFiles: () async {},
         ),
       )),
     ));
-    expect(find.text('Выбрать игру'), findsOneWidget);
-    await tester.tap(find.text('Выбрать игру'));
+    expect(find.textContaining('Ручной режим'), findsOneWidget);
+    expect(find.text('1 JSON'), findsOneWidget);
+    await tester.tap(find.text('Подготовить перевод (1 файлов)'));
     await tester.pumpAndSettle();
-    expect(chosen, isTrue);
+    expect(find.text('Подготовить перевод игры?'), findsOneWidget);
+    expect(appPickerOpened, isFalse);
   });
 
   testWidgets('lists open localization files and requires configured API',

@@ -35,14 +35,10 @@ void main() {
         '-1e-50', LiveValueFormat.float32), throwsFormatException);
     WindowsLiveMemoryService.validateValue('0', LiveValueFormat.float32);
     WindowsLiveMemoryService.validateValue('1e-44', LiveValueFormat.float32);
-    // 1e-45 rounds to the smallest nonzero Float32 subnormal.
     WindowsLiveMemoryService.validateValue('1e-45', LiveValueFormat.float32);
     WindowsLiveMemoryService.validateValue('-1e-45', LiveValueFormat.float32);
-    // Smallest Float32 subnormal must remain writable, including its sign.
-    WindowsLiveMemoryService.validateValue(
-        '1.401298464324817e-45', LiveValueFormat.float32);
-    WindowsLiveMemoryService.validateValue(
-        '-1.401298464324817e-45', LiveValueFormat.float32);
+    WindowsLiveMemoryService.validateValue('1.401298464324817e-45', LiveValueFormat.float32);
+    WindowsLiveMemoryService.validateValue('-1.401298464324817e-45', LiveValueFormat.float32);
     expect(() => WindowsLiveMemoryService.validateValue(
         '1e-324', LiveValueFormat.float64), throwsFormatException);
     WindowsLiveMemoryService.validateValue('1e-46', LiveValueFormat.float64);
@@ -132,6 +128,26 @@ void main() {
       addresses: ['malformed'],
       baselines: ['100'],
     ), throwsFormatException);
+  });
+
+  test('deep scan bounds CPU and memory before opening any process', () async {
+    final service = WindowsLiveMemoryService();
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int32,
+      budgetMiB: 513, bytewise: true,
+    ), throwsRangeError);
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int64,
+      budgetMiB: 2049,
+    ), throwsRangeError);
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int32,
+      maxResults: 5001,
+    ), throwsRangeError);
+    await expectLater(service.scan(
+      pid: 42, value: '100', format: LiveValueFormat.int32,
+      maxResults: 0,
+    ), throwsRangeError);
   });
 
   test('non-Windows helper refuses operation instead of process access',

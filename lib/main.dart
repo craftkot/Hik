@@ -25,6 +25,7 @@ import 'widgets/installed_app_picker.dart';
 import 'widgets/android_floating_panel.dart';
 import 'widgets/android_game_translation_panel.dart';
 import 'widgets/android_all_files_access_banner.dart';
+import 'widgets/android_container_lab.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 
@@ -37,7 +38,7 @@ const _accent = Color(0xFFB68BFF);
 const _cyanAccent = Color(0xFF5EE9F5);
 const _muted = Color(0xFFAAA5BE);
 
-enum Workspace { preloads, saves, localize, cheats }
+enum Workspace { preloads, saves, localize, cheats, container }
 
 extension WorkspaceInfo on Workspace {
   String get title => switch (this) {
@@ -45,18 +46,21 @@ extension WorkspaceInfo on Workspace {
     Workspace.saves => 'Редактор сохранений',
     Workspace.localize => 'Перевод игры',
     Workspace.cheats => 'Читы (соло)',
+    Workspace.container => 'Контейнер игр',
   };
   String get detail => switch (this) {
     Workspace.preloads => 'Просмотр ресурсов и распознанных файлов',
     Workspace.saves => 'Редактирование доступных текстовых сейвов',
     Workspace.localize => 'Локализация без изменения ключей JSON',
     Workspace.cheats => 'Windows RAM · поиск и изменение значений в офлайн-играх',
+    Workspace.container => 'Тест: игры внутри EHTID и импорт APK',
   };
   IconData get icon => switch (this) {
     Workspace.preloads => Icons.folder_zip_outlined,
     Workspace.saves => Icons.save_as_outlined,
     Workspace.localize => Icons.translate,
     Workspace.cheats => Icons.memory_outlined,
+    Workspace.container => Icons.inventory_2_outlined,
   };
 }
 
@@ -106,6 +110,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   InstalledGameApp? _selectedApp;
   String? _overlayNumber;
   final List<String> _extraFolders = [];
+  // Only explicitly confirmed save-discovery directories get unfiltered
+  // save listings. Installation folders still use the normal heuristics.
+  final Set<String> _windowsFoundSaveRoots = {};
+  Set<String> _windowsFoundSaveFileIds = {};
   List<GameFile> _files = [];
   GameFile? _selected;
   Uint8List? _bytes;
@@ -189,7 +197,14 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     try {
       final apps = await _storage.listInstalledApps();
       if (!mounted) return;
-      final chosen = await showInstalledAppPicker(context, apps);
+      if (apps.isEmpty) {
+        _message('Android не показывает установленные игры. '
+            'Откроем ручной выбор папки.');
+        await _chooseFolder();
+        return;
+      }
+      final chosen = await showInstalledAppPicker(context, apps,
+          onChooseFolder: _chooseFolder);
       if (!mounted || chosen == null) return;
       _query.clear();
       setState(() {
@@ -250,6 +265,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
+        _windowsFoundSaveRoots.clear();
+        _windowsFoundSaveFileIds.clear();
+        _query.clear();
         _selected = null; _bytes = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
@@ -285,65 +303,153 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
 
 
   Future<void> _findWindowsSaveFolders() async {
-    final source = _folder;
-    if (!Platform.isWindows || source == null || _loading) return;
+    if (!Platform.isWindows || _loading) return;
     if (_dirty) {
       _message('Сначала сохрани или отмени правки');
       return;
     }
-    if (_extraFolders.length >= 5) {
-      _message('Уже выбрано максимальное количество папок');
+    if (_folder != null && _extraFolders.length >= 5) {
+      _message('Уже подключены 6 папок. Удали лишние перед поиском.');
       return;
     }
-    setState(() => _loading = true);
+
+    // Let TextFormField own and dispose its controller with the dialog.
+    // Disposing a manually created controller immediately after pop()
+    // can race the dialog's reverse animation on Windows.
+    var typedName = _folder == null ? '' :
+        WindowsSaveDiscovery.suggestedGameNameFromPath(_folder!);
+    final gameName = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Найти сейвы по названию игры'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 440),
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Ищем только стандартные каталоги сохранений '
+                    'твоего профиля Windows, не весь диск. '
+                    'Можно начать даже без папки установленной игры.'),
+                const SizedBox(height: 12),
+                TextFormField(
+                  initialValue: typedName,
+                  autofocus: true,
+                  maxLength: 90,
+                  decoration: const InputDecoration(
+                    labelText: 'Название игры',
+                    hintText: 'Например: Stardew Valley',
+                  ),
+                  onChanged: (value) => typedName = value,
+                  onFieldSubmitted: (value) =>
+                      Navigator.pop(dialogContext, value.trim()),
+                ),
+                const Text('AppData · LocalLow · Saved Games · Documents · '
+                    'OneDrive Documents',
+                    style: TextStyle(fontSize: 11, color: _muted)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Отмена')),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, typedName.trim()),
+              child: const Text('Искать сейвы'),
+            ),
+          ],
+        ),
+      );
+    if (!mounted || gameName == null) return;
+    final normalized = WindowsSaveDiscovery.normalizedGameName(gameName);
+    if (normalized.length < 3) {
+      _message('Введи название игры не короче трёх символов');
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _state = 'Ищем сохранения: $gameName…';
+    });
     List<String> matches;
     try {
-      matches = await WindowsSaveDiscovery.discoverForGame(source);
+      matches = await WindowsSaveDiscovery.discoverByName(gameName);
     } catch (error) {
-      _message('Не удалось найти папки сохранений: $error');
+      _message('Поиск папок сохранений не удался: $error');
       return;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
     if (!mounted) return;
+
+    String key(String path) => path.replaceAll('\\', '/').toLowerCase();
+    final existing = <String>{
+      if (_folder != null) key(_folder!),
+      for (final path in _extraFolders) key(path),
+    };
+    final freeSlots = _folder == null
+        ? 6 : 5 - _extraFolders.length;
     final additions = matches
-        .where((f) => f != source && !_extraFolders.contains(f))
-        .take(5 - _extraFolders.length)
-        .toList();
+        .where((path) => !existing.contains(key(path)))
+        .take(freeSlots).toList();
     if (additions.isEmpty) {
-      _message('Папок с названием игры в стандартных местах не найдено. '
-          'Добавь папку вручную.');
+      _message('Для «$gameName» новых папок сейвов не найдено. '
+          'Можно открыть папку вручную.');
       return;
     }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Найденные папки сохранений Windows'),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Найдены каталоги, совпадающие с названием игры. '
-                'Подключить их к поиску? Другие приложения не сканируются.'),
-              const SizedBox(height: 10),
-              for (final path in additions) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 5),
-                child: SelectableText(path, style: const TextStyle(
-                  fontFamily: 'monospace', fontSize: 12)),
-              ),
-            ],
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 540, maxHeight: 380),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('«$gameName»: найдено ${additions.length} каталогов. '
+                    'Подключить их к редактору? Содержимое ещё не изменялось.'),
+                const SizedBox(height: 12),
+                for (final path in additions) Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: SelectableText(path, style: const TextStyle(
+                    fontFamily: 'monospace', fontSize: 12)),
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Отмена')),
+              child: const Text('Отмена')),
           FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Добавить к поиску')),
+              child: const Text('Подключить папки')),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _extraFolders.addAll(additions));
+
+    setState(() {
+      if (_folder == null) {
+        _folder = additions.first;
+        _extraFolders.addAll(additions.skip(1));
+        _selected = null;
+        _bytes = null;
+        _originalText = null;
+        _archive = null;
+        _archiveEntry = null;
+        _archiveEntryBytes = null;
+        _profile = null;
+        _mobilePreview = false;
+        _query.clear();
+      } else {
+        _extraFolders.addAll(additions);
+      }
+      _windowsFoundSaveRoots.addAll(additions);
+      // A discovery started in the translator must not switch tabs.
+      if (_section != Workspace.localize) _section = Workspace.saves;
+    });
     await _scan();
   }
 
@@ -459,12 +565,17 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       final roots = [folder, ..._extraFolders];
       final found = <GameFile>[];
       final ids = <String>{};
+      final foundSaveFileIds = <String>{};
       final errors = <String>[];
       for (var i = 0; i < roots.length; i++) {
         try {
           final batch = await _storage.scan(roots[i]);
           for (final item in batch) {
             if (!ids.add(item.id)) continue;
+            if (Platform.isWindows &&
+                _windowsFoundSaveRoots.contains(roots[i])) {
+              foundSaveFileIds.add(item.id);
+            }
             found.add(GameFile(
               id: item.id, name: item.name, size: item.size,
               relativePath: roots.length == 1
@@ -482,7 +593,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       found.sort((a, b) => a.relativePath.toLowerCase()
           .compareTo(b.relativePath.toLowerCase()));
       if (!mounted) return;
-      setState(() { _files = found; _profile = detectGameProfile(found);
+      setState(() { _files = found;
+        _windowsFoundSaveFileIds = foundSaveFileIds;
+        _profile = detectGameProfile(found);
         _selected = null; _bytes = null; _originalText = null;
         _mobilePreview = false;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
@@ -502,10 +615,16 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     final visible = _files.where((f) {
       final inSection = switch (_section) {
         Workspace.preloads => f.isLikelyPreload || (!f.isSave && !f.isLocalization),
-        Workspace.saves => _selectedApp != null || f.isSave,
+        // In Android manual-folder mode, unusual save extensions are common.
+        // Show every accessible file and let the user inspect it.
+        Workspace.saves => (Platform.isAndroid && _folder != null) ||
+            f.isSave ||
+            (Platform.isWindows && _windowsFoundSaveFileIds.contains(f.id) &&
+              !f.isImage && !f.isZipCandidate),
         Workspace.localize => f.isLocalization ||
             GameLocaleCandidates.canTranslate(f),
         Workspace.cheats => false,
+        Workspace.container => false,
       };
       return inSection && f.relativePath.toLowerCase().contains(search);
     }).toList();
@@ -914,7 +1033,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       const Divider(height: 1, color: Color(0xFF2D293C)),
       const SizedBox(height: 20),
       for (final section in Workspace.values)
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        if (Platform.isAndroid || section != Workspace.container)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           child: Tooltip(message: section.title,
             child: Material(color: _section == section ? _panelLight : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
@@ -956,10 +1076,13 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     child: Row(children: [
       if (!compact) Expanded(child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [Text(_section.title, style: const TextStyle(
+        children: [Text(_section.title, maxLines: 1,
+          overflow: TextOverflow.ellipsis, style: const TextStyle(
           fontSize: 23, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text(_section.detail, style: const TextStyle(fontSize: 12, color: _muted))],
+          Text(_section.detail, maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: _muted))],
       )),
       if (compact) Expanded(child: Text(_section.title, maxLines: 2,
         style: const TextStyle(fontWeight: FontWeight.w700))),
@@ -973,40 +1096,56 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
           child: Text(_selectedApp?.label ?? _folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
-      if (_folder != null && (_section == Workspace.saves ||
-          _section == Workspace.cheats || _section == Workspace.localize)) ...[
-        if (Platform.isWindows)
-          IconButton(onPressed: _loading ? null : _findWindowsSaveFolders,
-            tooltip: 'Найти папки сохранений Windows по названию игры',
-            icon: const Icon(Icons.travel_explore_outlined)),
+      if (Platform.isWindows &&
+          (_section == Workspace.saves || _section == Workspace.localize))
+        if (compact || _folder != null)
+          IconButton(
+            onPressed: _loading ? null : _findWindowsSaveFolders,
+            tooltip: 'Найти сейвы по названию игры',
+            icon: const Icon(Icons.travel_explore_outlined))
+        else
+          OutlinedButton.icon(
+            onPressed: _loading ? null : _findWindowsSaveFolders,
+            icon: const Icon(Icons.travel_explore_outlined, size: 17),
+            label: const Text('Найти сейвы')),
+      if (_folder != null &&
+          (_section == Workspace.saves || _section == Workspace.cheats ||
+              _section == Workspace.localize)) ...[
         if (Platform.isWindows || (!compact && Platform.isAndroid))
           IconButton(onPressed: _loading ? null : _addFolder,
             tooltip: 'Добавить папку с сейвами',
             icon: const Icon(Icons.create_new_folder_outlined)),
       ],
-      IconButton(onPressed: _loading || _folder == null ? null : _scan,
+      if (_section != Workspace.container)
+        IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
-      if (Platform.isAndroid)
-        IconButton(onPressed: _loading ? null :
-            (_selectedApp == null ? _chooseFolder : _grantAndroidGameFolder),
-          tooltip: _selectedApp == null
-              ? 'Вручную открыть папку игры'
-              : 'Один раз предоставить доступ к папке выбранной игры',
-          icon: const Icon(Icons.folder_open_outlined)),
-      const SizedBox(width: 6),
-      FilledButton.icon(
-          onPressed: _loading ? null :
-              (Platform.isAndroid ? _chooseInstalledApp : _chooseFolder),
-          icon: Icon(Platform.isAndroid
-              ? Icons.sports_esports_outlined : Icons.folder_open_outlined,
-              size: 18),
-          label: Text(Platform.isAndroid
-              ? (compact ? 'Игра' : 'Выбрать игру')
-              : (compact ? 'Папка' : 'Открыть папку игры'))),
+      if (Platform.isAndroid && _section != Workspace.container) ...[
+        if (_selectedApp != null)
+          IconButton(
+            onPressed: _loading ? null : _grantAndroidGameFolder,
+            tooltip: 'Привязать доступную папку к выбранной игре',
+            icon: const Icon(Icons.create_new_folder_outlined),
+          ),
+        IconButton(
+          onPressed: _loading ? null : _chooseInstalledApp,
+          tooltip: 'Выбрать установленную игру (дополнительный способ)',
+          icon: const Icon(Icons.sports_esports_outlined),
+        ),
+      ],
+      if (_section != Workspace.container) const SizedBox(width: 6),
+      if (_section != Workspace.container)
+        FilledButton.icon(
+          onPressed: _loading ? null : _chooseFolder,
+          icon: const Icon(Icons.folder_open_outlined, size: 18),
+          label: Text(compact ? 'Папка' : (Platform.isAndroid
+              ? 'Выбрать папку игры' : 'Открыть папку игры'))),
     ]),
   );
 
   Widget _workspaceView(bool compact) {
+    if (Platform.isAndroid && _section == Workspace.container) {
+      return const AndroidContainerLab();
+    }
     final narrow = compact || MediaQuery.sizeOf(context).width < 1000;
     if (narrow && _mobilePreview && _selected != null) return _detailView(narrow: true);
     if (Platform.isAndroid && _section == Workspace.localize) {
@@ -1016,6 +1155,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             storage: _storage,
             files: _files,
             gameName: _selectedApp?.label,
+            hasFolder: _folder != null,
             chooseGame: _chooseInstalledApp,
             grantFolder: _selectedApp == null
                 ? _chooseFolder : _grantAndroidGameFolder,
@@ -1063,8 +1203,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         const Divider(height: 1, color: Color(0xFF2D293C)),
         Expanded(child: _folder == null
             ? _emptyMessage(Icons.folder_open,
-                Platform.isAndroid ? 'Игра ещё не выбрана' : 'Папка ещё не выбрана',
-                Platform.isAndroid ? 'Нажми «Игра» в верхней панели.'
+                Platform.isAndroid ? 'Папка игры ещё не выбрана' : 'Папка ещё не выбрана',
+                Platform.isAndroid ? 'Нажми «Папка» сверху, чтобы открыть доступные файлы игры.'
                     : 'Открой папку игры — появятся доступные файлы.')
             : items.isEmpty
               ? _emptyMessage(Icons.manage_search,
@@ -1075,7 +1215,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                           'Нажми значок папки сверху, чтобы привязать ещё '
                           'один доступный каталог к этой игре. Приватные '
                           'данные Android недоступны.'
-                      : 'Проверь путь или выбери другую функцию слева.')
+                      : Platform.isAndroid
+                          ? 'В этой папке нет доступных файлов. Попробуй'
+                              ' другую общую папку игры. Android/data'
+                              ' и private data могут быть закрыты системой.'
+                          : 'Проверь путь или выбери другую функцию слева.')
               : ListView.builder(itemCount: items.length,
                   itemBuilder: (context, index) {
                     final file = items[index];
@@ -1347,7 +1491,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.10 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.16 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 
