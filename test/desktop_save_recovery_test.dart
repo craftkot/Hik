@@ -95,6 +95,18 @@ void main() {
     expect(await save.readAsBytes(), edited);
   });
 
+  test('deleted backup after preview never overwrites current save', () async {
+    final original = await save.readAsBytes();
+    final edited = bytes('hp=777;coins=500');
+    final backup = File(await SafeDesktopSaveWriter()
+        .write(save, edited, expected: original));
+    final preview = await recovery.preview(save, backup);
+    await backup.delete();
+    await expectLater(
+        recovery.restore(preview, confirmed: true), throwsA(isA<Exception>()));
+    expect(await save.readAsBytes(), edited);
+  });
+
   test('rejects the game changing the current save after preview', () async {
     final original = await save.readAsBytes();
     final edited = bytes('hp=200');
