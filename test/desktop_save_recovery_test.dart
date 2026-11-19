@@ -144,6 +144,17 @@ void main() {
     expect(await save.readAsBytes(), bytes('hp=120;coins=500'));
   });
 
+  test('more than 64 matching backups are rejected without touching save',
+      () async {
+    final original = await save.readAsBytes();
+    for (var i = 0; i <= DesktopSaveRecovery.maxBackups; i++) {
+      final backup = File('${save.path}.ehtid-backup-${i.toString().padLeft(3, '0')}.bak');
+      await backup.writeAsBytes(bytes('backup-$i'));
+    }
+    await expectLater(recovery.listBackups(save), throwsStateError);
+    expect(await save.readAsBytes(), original);
+  });
+
   test('same bytes do not require restoration', () async {
     final backup = File('${save.path}.ehtid-backup-test.bak');
     await backup.writeAsBytes(await save.readAsBytes());
