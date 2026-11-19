@@ -12,6 +12,28 @@ class GzipSaveCodec {
   static const int maxBytes = 8 * 1024 * 1024;
   static const int _chunkSize = 64 * 1024;
 
+  static final List<int> _crcTable = List<int>.generate(256, (index) {
+    var value = index;
+    for (var bit = 0; bit < 8; bit++) {
+      value = (value & 1) != 0
+          ? (value >>> 1) ^ 0xedb88320
+          : value >>> 1;
+    }
+    return value;
+  });
+
+  static int _readUint32LE(Uint8List data, int at) =>
+      data[at] | (data[at + 1] << 8) |
+      (data[at + 2] << 16) | (data[at + 3] << 24);
+
+  static int _crc32(Uint8List data) {
+    var crc = 0xffffffff;
+    for (final byte in data) {
+      crc = _crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) & 0xffffffff;
+  }
+
   static bool isGzip(Uint8List bytes) =>
       bytes.length >= 3 &&
       bytes[0] == 0x1f && bytes[1] == 0x8b && bytes[2] == 0x08;
@@ -25,6 +47,10 @@ class GzipSaveCodec {
     if (compressed.length > maxBytes) {
       throw const FormatException('Сжатый сейв превышает лимит 8 МиБ');
     }
+    // GZIP requires at least a 10-byte header and an 8-byte trailer.
+    if (compressed.length < 18) {
+      throw const FormatException('Неполный GZIP-заголовок или хвост');
+    }
     final output = _BoundedGzipSink(maxBytes);
     try {
       final decoder = gzip.decoder.startChunkedConversion(output);
@@ -33,7 +59,15 @@ class GzipSaveCodec {
           offset, math.min(offset + _chunkSize, compressed.length)));
       }
       decoder.close();
-      return output.takeBytes();
+      final plain = output.takeBytes();
+      // Dart's streaming zlib wrapper does not always reject a damaged
+      // trailer. Verify both RFC 1952 CRC32 and ISIZE before allowing edits.
+      final trailer = compressed.length - 8;
+      if (_readUint32LE(compressed, trailer + 4) != plain.length ||
+          _readUint32LE(compressed, trailer) != _crc32(plain)) {
+        throw const FormatException('Контрольная сумма или длина GZIP неверна');
+      }
+      return plain;
     } on FormatException {
       rethrow;
     } catch (_) {
