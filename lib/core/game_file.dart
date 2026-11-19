@@ -140,6 +140,8 @@ String hexPreview(Uint8List bytes, {int limit = 4096}) {
 /// Identify known magic headers without guessing that proprietary assets
 /// have been decrypted.
 String identifyFile(Uint8List bytes) {
+  if (bytes.length >= 3 && bytes[0] == 0x1f &&
+      bytes[1] == 0x8b && bytes[2] == 0x08) return 'GZIP-сжатие';
   if (bytes.length >= 4) {
     if (bytes[0] == 0x50 && bytes[1] == 0x4b &&
         ((bytes[2] == 3 && bytes[3] == 4) ||

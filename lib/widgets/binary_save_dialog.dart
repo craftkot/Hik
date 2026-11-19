@@ -21,8 +21,10 @@ class NumericPatchRequest {
 /// A strictly local numeric save-file editor. There is no process attachment
 /// or Android sandbox bypass here.
 class BinarySaveDialog extends StatefulWidget {
-  const BinarySaveDialog({super.key, required this.data});
+  const BinarySaveDialog({super.key, required this.data,
+    this.compressed = false});
   final Uint8List data;
+  final bool compressed;
 
   @override
   State<BinarySaveDialog> createState() => _BinarySaveDialogState();
@@ -84,15 +86,19 @@ class _BinarySaveDialogState extends State<BinarySaveDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Поиск значения в сейве'),
+      title: Text(widget.compressed
+          ? 'Поиск значения внутри GZIP' : 'Поиск значения в сейве'),
       content: SizedBox(
         width: 475,
         child: Column(mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Только неупакованные числовые поля в файле. '
-              'При совпадениях выбери правильное смещение.',
-              style: TextStyle(fontSize: 12)),
+            Text(widget.compressed
+                ? 'Поиск внутри распакованного GZIP. Смещения относятся '
+                  'к содержимому, а не к сжатым байтам.'
+                : 'Поиск числовых полей в бинарном файле. '
+                  'При совпадениях выбери правильное смещение.',
+              style: const TextStyle(fontSize: 12)),
             const SizedBox(height: 10),
             TextField(
               controller: _oldValue,
@@ -163,10 +169,10 @@ class _BinarySaveDialogState extends State<BinarySaveDialog> {
                 },
               ),
             ),
-            const Text('Игра должна быть закрыта при сохранении. '
-              'Сжатые, шифрованные и защищённые контрольной суммой '
-              'сейвы требуют отдельного адаптера.',
-              style: TextStyle(fontSize: 11)),
+            Text('Игра должна быть закрыта при сохранении. '
+              '${widget.compressed ? 'После правки GZIP будет упакован обратно. ' : ''}'
+              'Шифрование и игровые контрольные суммы не исправляются.',
+              style: const TextStyle(fontSize: 11)),
           ],
         ),
       ),
