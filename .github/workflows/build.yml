@@ -98,15 +98,20 @@ jobs:
           Copy-Item 'build/overlay/EHTID-Overlay.exe' $dist -Force
           Copy-Item 'docs/ALPHA_WINDOWS_RU.md' "$dist/START_HERE_RU.md" -Force
           Copy-Item 'assets/brand/logo.png' "$dist/EHTID_ICON.png" -Force
+          $versionLine = (Get-Content 'pubspec.yaml' | Where-Object { $_ -match '^version:\s*' } | Select-Object -First 1)
+          if (-not $versionLine -or $versionLine -notmatch '^version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?)') { throw 'Invalid pubspec version' }
+          $releaseVersion = $Matches[1]
           $text = @'
-          EHTID GAME LAB — WINDOWS ALPHA 0.4.2
+          EHTID GAME LAB — WINDOWS ALPHA __VERSION__
           1. Распакуй весь архив, не запускай из ZIP.
           2. Запусти game_lab.exe.
           3. Открой «Читы (соло)» → «Открыть поверх игры».
           4. В плавающей панели ищи и изменяй значения лишь своей офлайн-игры.
           5. Прочитай START_HERE_RU.md. Сделай копию сейвов перед правкой.
           '@
+          $text = $text.Replace('__VERSION__', $releaseVersion)
           [IO.File]::WriteAllText((Join-Path $dist 'START_HERE.txt'), $text, [Text.UTF8Encoding]::new($true))
+          if ((Get-Content (Join-Path $dist 'START_HERE.txt') -Raw) -notmatch [regex]::Escape("WINDOWS ALPHA $releaseVersion")) { throw 'START_HERE version mismatch' }
           foreach ($entry in @(
             'game_lab.exe', 'flutter_windows.dll',
             'EHTID-MemoryHelper.exe', 'EHTID-Overlay.exe',
