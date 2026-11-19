@@ -38,6 +38,21 @@ void main() {
     expect(found.single.length, old.length);
   });
 
+  test('backups with identical timestamps have stable filename ordering', () async {
+    final first = File('${save.path}.ehtid-backup-a.bak');
+    final second = File('${save.path}.ehtid-backup-b.bak');
+    await first.writeAsBytes(bytes('old-a'));
+    await second.writeAsBytes(bytes('old-b'));
+    final sameTime = DateTime.utc(2026, 1, 1);
+    await first.setLastModified(sameTime);
+    await second.setLastModified(sameTime);
+    for (var i = 0; i < 3; i++) {
+      final found = await recovery.listBackups(save);
+      expect(found.map((entry) => entry.file.path),
+          [second.path, first.path]);
+    }
+  });
+
   test('previews both files without editing and restores only on confirmation',
       () async {
     final original = await save.readAsBytes();

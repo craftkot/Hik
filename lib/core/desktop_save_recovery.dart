@@ -67,7 +67,13 @@ class DesktopSaveRecovery {
       result.add(DesktopBackupEntry(
           backup, length, await backup.lastModified()));
     }
-    result.sort((a, b) => b.modified.compareTo(a.modified));
+    result.sort((a, b) {
+      final byDate = b.modified.compareTo(a.modified);
+      if (byDate != 0) return byDate;
+      // Filesystems with coarse timestamps can give several backups the
+      // same modification time. Keep the picker order deterministic.
+      return b.file.path.compareTo(a.file.path);
+    });
     return result;
   }
 
