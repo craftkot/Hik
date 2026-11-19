@@ -162,9 +162,17 @@ class WindowsLiveMemoryService {
       if (parsed == null || !parsed.isFinite) {
         throw const FormatException('Нужно конечное дробное число');
       }
-      if (format == LiveValueFormat.float32 &&
-          parsed.abs() > 3.4028235e38) {
-        throw const FormatException('Значение вне диапазона Float32');
+      // A nonzero decimal can underflow while parsing to a Dart double.
+      final mantissa = normalized.split(RegExp(r'[eE]')).first;
+      if (parsed == 0 && RegExp(r'[1-9]').hasMatch(mantissa)) {
+        throw const FormatException('Число слишком мало для представления');
+      }
+      if (format == LiveValueFormat.float32) {
+        // Half of the smallest Float32 subnormal rounds to zero.
+        if (parsed.abs() > 3.4028235e38 ||
+            (parsed != 0 && parsed.abs() < 7.006492321624085e-46)) {
+          throw const FormatException('Значение вне диапазона Float32');
+        }
       }
     } else {
       final parsed = BigInt.tryParse(normalized);
