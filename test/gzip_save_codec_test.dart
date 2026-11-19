@@ -41,6 +41,14 @@ void main() {
     final damaged = Uint8List.fromList(valid);
     damaged[damaged.length - 1] ^= 0xff;
     expect(() => GzipSaveCodec.decode(damaged), throwsFormatException);
+    // CRC32 and ISIZE occupy separate four-byte fields in the GZIP trailer.
+    // Check both independently so a future decoder cannot skip CRC validation.
+    final badCrc = Uint8List.fromList(valid);
+    badCrc[badCrc.length - 8] ^= 0x01;
+    expect(() => GzipSaveCodec.decode(badCrc), throwsFormatException);
+    final badSize = Uint8List.fromList(valid);
+    badSize[badSize.length - 4] ^= 0x01;
+    expect(() => GzipSaveCodec.decode(badSize), throwsFormatException);
     expect(() => GzipSaveCodec.decode(
         Uint8List.fromList(valid.sublist(0, 7))), throwsFormatException);
     expect(() => GzipSaveCodec.decode(Uint8List.fromList([1, 2, 3])),
