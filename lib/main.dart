@@ -9,6 +9,7 @@ import 'core/android_app_save_discovery.dart';
 import 'core/archive_inspector.dart';
 import 'core/binary_save_editor.dart';
 import 'core/game_file.dart';
+import 'core/gzip_save_codec.dart';
 import 'core/game_locale_workflow.dart';
 import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
@@ -119,6 +120,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   List<GameFile> _files = [];
   GameFile? _selected;
   Uint8List? _bytes;
+  // The original on-disk bytes stay in _bytes for expected-byte backup writes.
+  Uint8List? _gzipPayload;
+  String? _gzipError;
   ArchiveInspector? _archive;
   ArchiveEntry? _archiveEntry;
   Uint8List? _archiveEntryBytes;
@@ -216,7 +220,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         // Choosing a game from Translator must stay in Translator.
         _section = _section == Workspace.localize
             ? Workspace.localize : Workspace.saves;
-        _selected = null; _bytes = null; _originalText = null;
+        _selected = null; _bytes = null; _gzipPayload = null; _gzipError = null; _originalText = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
       });
@@ -270,7 +274,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _windowsFoundSaveRoots.clear();
         _windowsFoundSaveFileIds.clear();
         _query.clear();
-        _selected = null; _bytes = null;
+        _selected = null; _bytes = null; _gzipPayload = null; _gzipError = null;
         _mobilePreview = false; _files = []; _profile = null;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
       await _scan();
@@ -437,7 +441,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _folder = additions.first;
         _extraFolders.addAll(additions.skip(1));
         _selected = null;
-        _bytes = null;
+        _bytes = null; _gzipPayload = null; _gzipError = null;
         _originalText = null;
         _archive = null;
         _archiveEntry = null;
@@ -598,7 +602,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       setState(() { _files = found;
         _windowsFoundSaveFileIds = foundSaveFileIds;
         _profile = detectGameProfile(found);
-        _selected = null; _bytes = null; _originalText = null;
+        _selected = null; _bytes = null; _gzipPayload = null; _gzipError = null; _originalText = null;
         _mobilePreview = false;
         _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
         _state = _selectedApp != null
@@ -666,7 +670,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       // Invalidate previously opened bytes before the next read. A failure
       // must not leave stale data or a stale write action in the editor.
       _selected = null;
-      _bytes = null;
+      _bytes = null; _gzipPayload = null; _gzipError = null;
       _archive = null;
       _archiveEntry = null;
       _archiveEntryBytes = null;
@@ -681,12 +685,25 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           ? await _storage.readPreview(file) : await _storage.read(file);
       final inspector = !isLarge && ArchiveInspector.isZip(bytes)
           ? ArchiveInspector.open(bytes) : null;
-      final decoded = file.isImage || isLarge || inspector != null
-          ? null : decodeEditableText(bytes);
+      Uint8List? unpacked;
+      String? gzipError;
+      if (!isLarge && inspector == null && GzipSaveCodec.isGzip(bytes)) {
+        try {
+          unpacked = GzipSaveCodec.decode(bytes);
+        } on FormatException catch (error) {
+          // Keep a read-only HEX view of the original, never edit corrupt GZIP.
+          gzipError = error.message.toString();
+        }
+      }
+      final decoded = file.isImage || isLarge || inspector != null ||
+          gzipError != null
+          ? null : decodeEditableText(unpacked ?? bytes);
       if (!mounted) return false;
       setState(() {
         _selected = file;
         _bytes = bytes;
+        _gzipPayload = unpacked;
+        _gzipError = gzipError;
         _archive = inspector;
         _archiveEntry = null;
         _archiveEntryBytes = null;
@@ -710,7 +727,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     final original = _bytes;
     if (selected == null || _originalText == null || original == null || !_dirty) return;
     try {
-      if (selected.isJson) jsonDecode(_editor.text);
+      if (selected.isJson || (_gzipPayload != null &&
+          (_editor.text.trimLeft().startsWith('{') ||
+           _editor.text.trimLeft().startsWith('[')))) {
+        jsonDecode(_editor.text);
+      }
     } catch (_) {
       _message('JSON содержит ошибку. Сохранять не стал.');
       return;
@@ -735,7 +756,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (!_bytesEqual(current, original)) {
         throw StateError('Файл изменился после открытия. Обнови его перед записью.');
       }
-      final bytes = Uint8List.fromList(utf8.encode(_editor.text));
+      final payload = Uint8List.fromList(utf8.encode(_editor.text));
+      final bytes = _gzipPayload == null
+          ? payload : GzipSaveCodec.encode(payload);
       final backup = await _storage.writeWithBackup(
           selected, bytes, expected: original);
       final verify = await _storage.read(selected);
@@ -743,8 +766,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         throw StateError('Данные после записи не совпадают. Резервная копия: $backup');
       }
       if (!mounted) return;
-      setState(() { _bytes = bytes; _originalText = _editor.text;
-        _dirty = false; });
+      setState(() { _bytes = bytes; _gzipPayload =
+          GzipSaveCodec.isGzip(bytes) ? payload : null;
+        _originalText = _editor.text; _dirty = false; });
       _message('Применено! Резервная копия: $backup');
     } catch (error) { _message('Запись отменена / ошибка: $error'); }
     finally { if (mounted) setState(() => _loading = false); }
@@ -773,7 +797,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     // Never continue to display stale bytes after restoration.
     setState(() {
       _selected = null;
-      _bytes = null;
+      _bytes = null; _gzipPayload = null; _gzipError = null;
       _originalText = null;
       _archive = null;
       _archiveEntry = null;
@@ -801,7 +825,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         file.size > maxEditableBytes) return;
     final request = await showDialog<NumericPatchRequest>(
       context: context,
-      builder: (_) => BinarySaveDialog(data: original),
+      builder: (_) => BinarySaveDialog(
+        data: _gzipPayload ?? original, compressed: _gzipPayload != null),
     );
     if (!mounted || request == null) return;
     await _applyBinaryPatch(file, original, request);
@@ -810,16 +835,24 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   Future<void> _applyBinaryPatch(GameFile file, Uint8List original,
       NumericPatchRequest request) async {
     Uint8List patched;
+    Uint8List? updatedGzipPayload;
     try {
       if (_selected?.id != file.id || !identical(_bytes, original)) {
         throw StateError('Открытый файл изменился: повтори поиск');
       }
-      patched = BinarySaveEditor.patch(original,
+      if (GzipSaveCodec.isGzip(original) && _gzipPayload == null) {
+        throw StateError('GZIP не распакован. Запись запрещена');
+      }
+      final payload = _gzipPayload ?? original;
+      final patchedPayload = BinarySaveEditor.patch(payload,
         offset: request.offset,
         expected: request.expected,
         replacement: request.replacement,
         format: request.format,
       );
+      updatedGzipPayload = _gzipPayload == null ? null : patchedPayload;
+      patched = updatedGzipPayload == null
+          ? patchedPayload : GzipSaveCodec.encode(patchedPayload);
       if (_bytesEqual(original, patched)) {
         _message('Новое значение совпадает со старым — записывать нечего');
         return;
@@ -833,7 +866,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Изменить бинарный сейв?'),
         content: Text('Файл: ${file.relativePath}\n'
-          'Смещение: 0x${request.offset.toRadixString(16)}\n'
+          'Смещение${updatedGzipPayload != null ? ' внутри GZIP' : ''}: '
+          '0x${request.offset.toRadixString(16)}\n'
           '${request.format.label}: ${request.expected} → ${request.replacement}\n\n'
           'Сначала создадим резервную копию. '
           'Если игра использует контрольную сумму или шифрование, '
@@ -860,7 +894,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         throw StateError('Проверка записи не прошла. Бэкап: $backup');
       }
       if (!mounted) return;
-      setState(() { _bytes = patched; _state = 'Бинарный сейв обновлён'; });
+      setState(() { _bytes = patched; _gzipPayload = updatedGzipPayload;
+        _state = 'Бинарный сейв обновлён'; });
       _message('Записано и проверено. Бэкап: $backup');
     } catch (error) {
       _message('Не удалось применить правку: $error');
@@ -1090,7 +1125,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       _message('Сначала примени или отмени изменения в открытом файле');
       return;
     }
-    setState(() { _section = value; _selected = null; _bytes = null;
+    setState(() { _section = value; _selected = null; _bytes = null; _gzipPayload = null; _gzipError = null;
       _originalText = null; _mobilePreview = false;
       _archive = null; _archiveEntry = null; _archiveEntryBytes = null; });
   }
@@ -1377,9 +1412,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       child: _emptyMessage(Icons.description_outlined,
           'Выбери файл', 'Два раза нажимать не обязательно — одного касания хватит.'));
     final imagePreview = _archive == null && file.isImage && file.size <= maxEditableBytes;
+    final displayBytes = _gzipPayload ?? bytes;
     final canEdit = _originalText != null && !file.isImage;
     final canBinaryEdit = _section == Workspace.saves && !canEdit &&
-        _archive == null && !file.isImage && file.size <= maxEditableBytes;
+        _gzipError == null && _archive == null &&
+        !file.isImage && file.size <= maxEditableBytes;
     final canUseIniEditor = Platform.isWindows &&
         _section == Workspace.saves && canEdit && _archive == null &&
         (file.extension == '.ini' || file.extension == '.cfg') &&
@@ -1403,7 +1440,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 children: [Text(file.name, maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w700)),
-                  Text('${_formatSize(file.size)}  ·  ${_archive != null ? 'ZIP · ${_archive!.entries.length} элементов' : identifyFile(bytes)}',
+                  Text('${_formatSize(file.size)}  ·  ${_archive != null ? 'ZIP · ${_archive!.entries.length} элементов' : _gzipPayload != null ? 'GZIP → ${identifyFile(displayBytes)} · ${_formatSize(displayBytes.length)}' : identifyFile(bytes)}',
                       style: const TextStyle(fontSize: 11, color: _muted))])),
             if (Platform.isWindows && _section == Workspace.saves &&
                 file.isSave)
@@ -1459,8 +1496,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 : SingleChildScrollView(padding: const EdgeInsets.all(20),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('HEX-ПРОСМОТР',
-                            style: TextStyle(color: _accent,
+                        Text(_gzipPayload != null
+                            ? 'HEX-ПРОСМОТР · РАСПАКОВАНО' : 'HEX-ПРОСМОТР',
+                            style: const TextStyle(color: _accent,
                                 fontWeight: FontWeight.w700, fontSize: 12)),
                         if (canBinaryEdit) Padding(
                           padding: const EdgeInsets.only(top: 12, bottom: 8),
@@ -1471,11 +1509,17 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        const Text('Формат не распознан как обычный UTF-8. '
-                            'Шифрование и упаковка зависят от конкретной игры.',
-                            style: TextStyle(color: _muted, fontSize: 12)),
+                        Text(_gzipError != null
+                            ? 'GZIP: $_gzipError. Изменение запрещено.'
+                            : _gzipPayload != null
+                              ? 'GZIP распакован. Ниже байты содержимого, '
+                                'а не сжатого файла. Формат данных '
+                                'может оставаться бинарным.'
+                              : 'Формат не распознан как обычный UTF-8. '
+                                'Шифрование и упаковка зависят от конкретной игры.',
+                            style: const TextStyle(color: _muted, fontSize: 12)),
                         const SizedBox(height: 16),
-                        SelectableText(hexPreview(bytes), style: const TextStyle(
+                        SelectableText(hexPreview(displayBytes), style: const TextStyle(
                             fontFamily: 'monospace', fontSize: 11)),
                       ]))),
         Padding(padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
@@ -1483,7 +1527,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: Text(canEdit
                   ? 'Редактирование локально · резервная копия при применении'
                   : canBinaryEdit
-                    ? 'Числовые поля: поиск, выбор смещения, бэкап перед записью'
+                    ? '${_gzipPayload != null ? 'GZIP · ' : ''}Числовые поля: поиск, выбор смещения, бэкап перед записью'
                     : 'Просмотр без изменений исходного файла',
                   style: const TextStyle(fontSize: 11, color: _muted)))),
       ]),
