@@ -179,7 +179,9 @@ class LocaleTranslator {
         (match) {
       final index = tokens.length;
       tokens.add(match.group(0)!);
-      return ' EHTIDTOKEN${index}KEEP ';
+      // Keep the source's own whitespace. Artificial spaces around
+      // protected tokens would leak into game text after restoration.
+      return 'EHTIDTOKEN${index}KEEP';
     });
     var translatedText = await _send(masked);
     for (var i = 0; i < tokens.length; i++) {
