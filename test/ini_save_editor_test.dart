@@ -16,7 +16,7 @@ void main() {
 
   test('indexes numeric sections and prioritizes currency, HP, mana, level', () {
     final fields = IniSaveEditor.inspect(save);
-    expect(fields, hasLength(6));
+    expect(fields, hasLength(5));
     expect(fields.map((f) => f.displayPath), [
       'Player / hp', 'Player / gold', 'Player / mana',
       'Player / level', 'Inventory / gold',
@@ -98,7 +98,7 @@ void main() {
     expect(found.first.key, 'field0');
     expect(found.last.key, 'field14');
     expect(() => IniSaveEditor.inspect(source, max: 10001), throwsRangeError);
-    expect(() => IniSaveEditor.inspect('A' * (8 * 1024 * 1024 + 1)),
+    expect(() => IniSaveEditor.inspect(List.filled(8 * 1024 * 1024 + 1, 'A').join()),
         throwsFormatException);
   });
 }
