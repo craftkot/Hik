@@ -49,7 +49,7 @@ class LocaleTranslator {
 
     Future<void> processLine(String line, String ending) async {
       var count = 0;
-      for (var i = line.length - 1; i >= 0 && line[i] == r'\'; i--) {
+      for (var i = line.length - 1; i >= 0 && line.codeUnitAt(i) == 0x5c; i--) {
         count++;
       }
       final nextContinuation = count.isOdd;
@@ -72,6 +72,11 @@ class LocaleTranslator {
       final prefix = match.group(1)!;
       final value = match.group(2)!;
       final key = prefix.split(RegExp(r'[=:]')).first.trim();
+      if (value.trim().isEmpty) {
+        output.write(line);
+        output.write(ending);
+        return;
+      }
       final leading = RegExp(r'^[ \t]*').firstMatch(value)!.group(0)!;
       final trailing = RegExp(r'[ \t]*$').firstMatch(value)!.group(0)!;
       final originalValue = value.substring(
