@@ -103,7 +103,7 @@ void main() {
     final preview = await recovery.preview(save, backup);
     await backup.delete();
     await expectLater(
-        recovery.restore(preview, confirmed: true), throwsA(isA<Exception>()));
+        recovery.restore(preview, confirmed: true), throwsStateError);
     expect(await save.readAsBytes(), edited);
   });
 
