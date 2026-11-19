@@ -1518,7 +1518,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.16 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.18 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 
