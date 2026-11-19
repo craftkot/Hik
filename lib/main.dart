@@ -13,6 +13,7 @@ import 'core/game_locale_workflow.dart';
 import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
+import 'core/ini_save_editor.dart';
 import 'core/storage_service.dart';
 import 'core/save_value_priority.dart';
 import 'core/translation_service.dart';
@@ -28,6 +29,7 @@ import 'widgets/android_all_files_access_banner.dart';
 import 'widgets/android_container_lab.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
+import 'widgets/ini_save_field_browser.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -619,6 +621,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         // Show every accessible file and let the user inspect it.
         Workspace.saves => (Platform.isAndroid && _folder != null) ||
             f.isSave ||
+            (Platform.isWindows && f.isStructuredIniSaveCandidate) ||
             (Platform.isWindows && _windowsFoundSaveFileIds.contains(f.id) &&
               !f.isImage && !f.isZipCandidate),
         Workspace.localize => f.isLocalization ||
@@ -863,6 +866,97 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       _message('Не удалось применить правку: $error');
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _showIniFields() async {
+    if (!Platform.isWindows || _section != Workspace.saves ||
+        _selected == null || _originalText == null) return;
+    List<IniSaveField> fields;
+    try {
+      fields = IniSaveEditor.prioritize(
+          IniSaveEditor.inspect(_editor.text));
+    } catch (error) {
+      _message('Не удалось прочитать INI: $error');
+      return;
+    }
+    if (fields.isEmpty) {
+      _message('В INI не найдены простые числовые поля. '
+          'Открой текстовый редактор, если знаешь формат.');
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _panel,
+      builder: (sheetContext) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.8,
+          child: IniSaveFieldBrowser(
+            fields: fields,
+            onClose: () => Navigator.pop(sheetContext),
+            onEdit: (field) async {
+              final changed = await _editIniNumber(field);
+              if (changed && sheetContext.mounted) {
+                Navigator.pop(sheetContext);
+              }
+              return changed;
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _editIniNumber(IniSaveField field) async {
+    var typed = field.value;
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить число в INI'),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SelectableText(field.displayPath,
+              style: const TextStyle(fontSize: 12, color: _muted)),
+            const SizedBox(height: 8),
+            Text('Строка: ' + (field.lineIndex + 1).toString() +
+                ' · Было: ' + field.value,
+              style: const TextStyle(fontSize: 12, color: _muted)),
+            const SizedBox(height: 14),
+            TextFormField(
+              initialValue: typed,
+              onChanged: (value) => typed = value,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Новое число'),
+              keyboardType: const TextInputType.numberWithOptions(
+                  signed: true, decimal: true),
+              onFieldSubmitted: (value) =>
+                  Navigator.pop(dialogContext, value.trim()),
+            ),
+            const SizedBox(height: 9),
+            const Text('Меняется только выбранное число. '
+                'Дальше проверь предпросмотр и нажми «Применить» '
+                'для записи с резервной копией.',
+              style: TextStyle(fontSize: 12)),
+          ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, typed.trim()),
+            child: const Text('В предпросмотр')),
+        ],
+      ),
+    );
+    if (updated == null || !mounted) return false;
+    try {
+      final next = IniSaveEditor.changeNumber(_editor.text, field, updated);
+      if (!mounted) return false;
+      setState(() => _editor.text = next);
+      return true;
+    } catch (error) {
+      _message('Поле INI не изменено: $error');
+      return false;
     }
   }
 
@@ -1286,6 +1380,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     final canEdit = _originalText != null && !file.isImage;
     final canBinaryEdit = _section == Workspace.saves && !canEdit &&
         _archive == null && !file.isImage && file.size <= maxEditableBytes;
+    final canUseIniEditor = Platform.isWindows &&
+        _section == Workspace.saves && canEdit && _archive == null &&
+        (file.extension == '.ini' || file.extension == '.cfg') &&
+        (file.isSave || file.isStructuredIniSaveCandidate ||
+            _windowsFoundSaveFileIds.contains(file.id));
     final canUseJsonEditor = canEdit &&
         (_section == Workspace.saves || _section == Workspace.localize) &&
         (file.isJson || _editor.text.trimLeft().startsWith('{') ||
@@ -1312,6 +1411,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 tooltip: 'Просмотреть и восстановить резервную копию',
                 onPressed: _loading || _dirty ? null : _restoreOpenedSave,
                 icon: const Icon(Icons.restore, color: _cyanAccent)),
+            if (canUseIniEditor) IconButton(
+              tooltip: 'Редактировать числовые поля INI',
+              onPressed: _loading ? null : _showIniFields,
+              icon: const Icon(Icons.tune_outlined, color: _accent)),
             if (canUseJsonEditor) IconButton(
               tooltip: 'Редактировать поля JSON',
               onPressed: _showJsonFields,
@@ -1518,7 +1621,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.18 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.19 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 

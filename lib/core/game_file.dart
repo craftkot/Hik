@@ -56,6 +56,26 @@ class GameFile {
     }.contains(extension);
   }
 
+  /// Only plausible INI/CFG saves, never arbitrary game configuration.
+  bool get isStructuredIniSaveCandidate {
+    if (extension != '.ini' && extension != '.cfg') return false;
+    final normalized = relativePath.toLowerCase().replaceAll('\\', '/');
+    final parts = normalized.split('/');
+    if (parts.any((part) => const {
+      'config', 'configs', 'settings', 'cache', 'backup', 'backups',
+      'locales', 'lang', 'i18n', 'localization',
+    }.contains(part))) return false;
+    final stem = name.toLowerCase().substring(
+        0, name.length - extension.length);
+    const prefixes = <String>['save', 'slot', 'player', 'profile', 'character'];
+    for (final prefix in prefixes) {
+      if (!stem.startsWith(prefix)) continue;
+      final suffix = stem.substring(prefix.length);
+      if (!RegExp(r'[^a-z0-9_-]').hasMatch(suffix)) return true;
+    }
+    return false;
+  }
+
   bool get isJson => extension == '.json';
 
   /// Recognize genuine line-based localization, not settings or save files.

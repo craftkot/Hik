@@ -19,6 +19,24 @@ void main() {
     expect(file.isJson, isTrue);
   });
 
+  test('recognizes plausible INI saves but never arbitrary settings', () {
+    const file = GameFile(id: 'save', name: 'playerStats.ini',
+        relativePath: 'Game/playerStats.ini', size: 400);
+    const save = GameFile(id: 'slot', name: 'slot1.cfg',
+        relativePath: 'Game/slot1.cfg', size: 400);
+    const config = GameFile(id: 'config', name: 'player.ini',
+        relativePath: 'Game/config/player.ini', size: 400);
+    const settings = GameFile(id: 'settings', name: 'settings.ini',
+        relativePath: 'Game/settings.ini', size: 400);
+    expect(file.isStructuredIniSaveCandidate, isTrue);
+    expect(save.isStructuredIniSaveCandidate, isTrue);
+    expect(config.isStructuredIniSaveCandidate, isFalse);
+    expect(settings.isStructuredIniSaveCandidate, isFalse);
+    expect(const GameFile(id: 'other', name: 'savegame.json',
+        relativePath: 'Game/savegame.json', size: 5)
+        .isStructuredIniSaveCandidate, isFalse);
+  });
+
   test('UTF-8 valid editable, binary invalid and non-lossy', () {
     expect(decodeEditableText(Uint8List.fromList(utf8.encode('{"hp":12}'))),
         '{"hp":12}');
