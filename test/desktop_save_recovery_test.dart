@@ -107,6 +107,22 @@ void main() {
     expect(await save.readAsBytes(), edited);
   });
 
+  test('backup replaced by a directory after preview cannot restore', () async {
+    final original = await save.readAsBytes();
+    final edited = bytes('hp=888;coins=500');
+    final backup = File(await SafeDesktopSaveWriter()
+        .write(save, edited, expected: original));
+    final preview = await recovery.preview(save, backup);
+
+    await backup.delete();
+    await Directory(backup.path).create();
+
+    await expectLater(
+        recovery.restore(preview, confirmed: true), throwsStateError);
+    expect(await save.readAsBytes(), edited);
+    expect(await Directory(backup.path).exists(), isTrue);
+  });
+
   test('rejects the game changing the current save after preview', () async {
     final original = await save.readAsBytes();
     final edited = bytes('hp=200');
