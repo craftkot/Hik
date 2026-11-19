@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:game_lab/core/game_file.dart';
@@ -144,6 +145,47 @@ void main() {
     expect(GameValueSearch.matchesBinaryHit(hit, changed), isFalse);
     expect(GameValueSearch.matchesBinaryHit(hit, Uint8List(2)), isFalse);
     expect(GameValueSearch.matchesBinaryHit(hit, Uint8List(0)), isFalse);
+  });
+
+  test('GZIP search finds text and numeric bytes inside compressed saves',
+      () async {
+    final textSave = Uint8List.fromList(
+        gzip.encode('{"coins":150}'.codeUnits));
+    final binarySave = Uint8List.fromList(
+        gzip.encode([0xaa, 42, 0, 0, 0, 0xbb]));
+    final textFile = _file('text', 'SaveData1.gz', textSave.length);
+    final binaryFile = _file('bin', 'SaveData2.gz', binarySave.length);
+    final storage = _FakeStorage({'text': textSave, 'bin': binarySave});
+
+    final textReport = await GameValueSearch.search(
+      storage: storage, files: [textFile, binaryFile], query: '150');
+    expect(textReport.hits, hasLength(1));
+    expect(textReport.hits.single.isText, isTrue);
+    expect(textReport.hits.single.isCompressed, isTrue);
+    expect(textReport.hits.single.format, contains('GZIP'));
+    expect(textReport.hits.single.preview, contains('coins'));
+
+    final binaryReport = await GameValueSearch.search(
+      storage: storage, files: [binaryFile], query: '42');
+    final hit = binaryReport.hits.single;
+    expect(hit.isCompressed, isTrue);
+    expect(hit.offset, 1);
+    expect(hit.location, contains('внутри GZIP'));
+    expect(GameValueSearch.matchesBinaryHit(hit, binarySave), isTrue);
+    final changed = Uint8List.fromList(gzip.encode([0xaa, 43, 0, 0, 0, 0xbb]));
+    expect(GameValueSearch.matchesBinaryHit(hit, changed), isFalse);
+    expect(GameValueSearch.matchesBinaryHit(hit,
+        Uint8List.fromList([0xaa, 42, 0, 0, 0, 0xbb])), isFalse);
+  });
+
+  test('Damaged GZIP is not scanned as random compressed bytes', () async {
+    final invalid = Uint8List.fromList([0x1f, 0x8b, 0x08, 0, 0, 0]);
+    final report = await GameValueSearch.search(
+      storage: _FakeStorage({'bad': invalid}),
+      files: [_file('bad', 'SaveData3.gz', invalid.length)],
+      query: '42');
+    expect(report.hits, isEmpty);
+    expect(report.readErrors, 1);
   });
 
   test('cancellation, duplicates, global cap and explicit file limit',
