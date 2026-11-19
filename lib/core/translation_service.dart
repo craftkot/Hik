@@ -26,6 +26,101 @@ class LocaleTranslator {
     return const JsonEncoder.withIndent('  ').convert(output);
   }
 
+  /// Translates only VALUES in UTF-8 .lang / .properties dictionaries.
+  /// Never rebuilds the entire document: comments, keys, separators, blank
+  /// lines, CRLF/LF, and unsupported escape sequences remain byte-for-byte.
+  Future<String> translateKeyValue(String source) async {
+    if (source.length > 1024 * 1024) {
+      throw const FormatException('Локализация больше 1 МиБ');
+    }
+    translated = 0;
+    final output = StringBuffer();
+    var cursor = 0;
+    var continuation = false;
+    final definition = RegExp(
+        r'^([ \t]*[A-Za-z0-9_.-]+[ \t]*[=:][ \t]*)(.*)$');
+    final forbiddenKey = RegExp(
+        r'(^|[_.-])(id|path|url|file|asset|sprite|icon|key|'
+        r'hash|checksum|server|port|version|enabled|debug)([_.-]|$)',
+        caseSensitive: false);
+    final numericOrFlag = RegExp(
+        r'^(true|false|yes|no|null|on|off|[+-]?[0-9]+(\.[0-9]+)?)$',
+        caseSensitive: false);
+
+    Future<void> processLine(String line, String ending) async {
+      var count = 0;
+      for (var i = line.length - 1; i >= 0 && line.codeUnitAt(i) == 0x5c; i--) {
+        count++;
+      }
+      final nextContinuation = count.isOdd;
+      final skip = continuation || nextContinuation ||
+          translated >= maxStrings;
+      continuation = nextContinuation;
+      if (skip) {
+        output.write(line);
+        output.write(ending);
+        return;
+      }
+      final bom = line.startsWith('\uFEFF') ? '\uFEFF' : '';
+      final text = bom.isEmpty ? line : line.substring(1);
+      final match = definition.firstMatch(text);
+      if (match == null) {
+        output.write(line);
+        output.write(ending);
+        return;
+      }
+      final prefix = match.group(1)!;
+      final value = match.group(2)!;
+      final key = prefix.split(RegExp(r'[=:]')).first.trim();
+      if (value.trim().isEmpty) {
+        output.write(line);
+        output.write(ending);
+        return;
+      }
+      final leading = RegExp(r'^[ \t]*').firstMatch(value)!.group(0)!;
+      final trailing = RegExp(r'[ \t]*$').firstMatch(value)!.group(0)!;
+      final originalValue = value.substring(
+          leading.length, value.length - trailing.length);
+      // Escapes other than \n/\r/\t may carry semantic data. Never
+      // normalize or translate them without format-aware parsing.
+      final unsafeEscape = RegExp(r'\\(?![nrt])').hasMatch(originalValue);
+      final inlineComment = RegExp(r'(^|[ \t])[#;]')
+          .hasMatch(originalValue);
+      if (forbiddenKey.hasMatch(key) ||
+          numericOrFlag.hasMatch(originalValue) ||
+          unsafeEscape || inlineComment ||
+          !_isNaturalText(originalValue)) {
+        output.write(line);
+        output.write(ending);
+        return;
+      }
+
+      final replacement = await _translatePreservingTokens(originalValue);
+      if (replacement.contains('\n') || replacement.contains('\r') ||
+          replacement.isEmpty) {
+        throw const FormatException(
+          'Переводчик изменил структуру строки — запись отменена');
+      }
+      output.write(bom);
+      output.write(prefix);
+      output.write(leading);
+      output.write(replacement);
+      output.write(trailing);
+      output.write(ending);
+      translated++;
+    }
+
+    for (final ending in RegExp(r'\r\n|\n|\r').allMatches(source)) {
+      await processLine(source.substring(cursor, ending.start),
+          ending.group(0)!);
+      cursor = ending.end;
+    }
+    if (cursor < source.length) {
+      await processLine(source.substring(cursor), '');
+    }
+    return output.toString();
+  }
+
   Future<dynamic> _walk(dynamic value) async {
     if (value is Map) {
       final output = <String, dynamic>{};
@@ -80,11 +175,13 @@ class LocaleTranslator {
   Future<String> _translatePreservingTokens(String source) async {
     final tokens = <String>[];
     final masked = source.replaceAllMapped(
-        RegExp(r'\{[^{}]+\}|%[0-9$+.-]*[a-zA-Z]|<[^<>]+>|\\n|\\t'),
+        RegExp(r'\{[^{}]+\}|%[0-9$+.-]*[a-zA-Z]|<[^<>]+>|\\n|\\t|\\r|§[0-9a-fk-or]|&[0-9a-fk-or]', caseSensitive: false),
         (match) {
       final index = tokens.length;
       tokens.add(match.group(0)!);
-      return ' EHTIDTOKEN${index}KEEP ';
+      // Keep the source's own whitespace. Artificial spaces around
+      // protected tokens would leak into game text after restoration.
+      return 'EHTIDTOKEN${index}KEEP';
     });
     var translatedText = await _send(masked);
     for (var i = 0; i < tokens.length; i++) {

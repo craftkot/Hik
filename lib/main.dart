@@ -51,7 +51,7 @@ extension WorkspaceInfo on Workspace {
   String get detail => switch (this) {
     Workspace.preloads => 'Просмотр ресурсов и распознанных файлов',
     Workspace.saves => 'Редактирование доступных текстовых сейвов',
-    Workspace.localize => 'Локализация без изменения ключей JSON',
+    Workspace.localize => 'Локализация JSON, .lang и .properties без изменения ключей',
     Workspace.cheats => 'Windows RAM · поиск и изменение значений в офлайн-играх',
     Workspace.container => 'Тест: игры внутри EHTID и импорт APK',
   };
@@ -622,7 +622,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             (Platform.isWindows && _windowsFoundSaveFileIds.contains(f.id) &&
               !f.isImage && !f.isZipCandidate),
         Workspace.localize => f.isLocalization ||
-            GameLocaleCandidates.canTranslate(f),
+            GameLocaleCandidates.canTranslate(f) ||
+            (Platform.isWindows && f.isKeyValueLocale),
         Workspace.cheats => false,
         Workspace.container => false,
       };
@@ -942,9 +943,13 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _translateJson() async {
-    if (_selected?.isJson != true || _originalText == null) {
-      _message('Для автоперевода открой JSON локализации');
+  Future<void> _translateSelectedLocale() async {
+    final file = _selected;
+    final isKeyValue = Platform.isWindows &&
+        file?.isKeyValueLocale == true;
+    if (file == null || _originalText == null ||
+        (!file.isJson && !isKeyValue)) {
+      _message('Открой JSON, .lang или .properties из папки локализации');
       return;
     }
     final raw = _endpoint.text.trim();
@@ -953,17 +958,36 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       _message('Укажи URL LibreTranslate: https://сервер/translate');
       return;
     }
-    setState(() { _loading = true; _state = 'Переводим строки JSON…'; });
+    if (_dirty) {
+      _message('Сначала примени или отмени предыдущие изменения');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _state = isKeyValue
+          ? 'Переводим значения .lang / .properties…'
+          : 'Переводим строки JSON…';
+    });
     try {
       final translator = LocaleTranslator(
         endpoint: url, target: _language, apiKey: _apiKey.text.trim());
-      final result = await translator.translateJson(_editor.text);
-      if (!mounted) return;
-      setState(() { _editor.text = result; _dirty = result != _originalText;
-        _state = 'Переведено ${translator.translated} строк — проверь результат'; });
-      _message('Переведено ${translator.translated} строк. Пока только предпросмотр.');
-    } catch (error) { _message('Не удалось перевести: $error'); }
-    finally { if (mounted) setState(() => _loading = false); }
+      final original = _editor.text;
+      final result = isKeyValue
+          ? await translator.translateKeyValue(original)
+          : await translator.translateJson(original);
+      if (!mounted || _selected?.id != file.id) return;
+      setState(() {
+        _editor.text = result;
+        _dirty = result != _originalText;
+        _state = 'Переведено ${translator.translated} строк — проверь результат';
+      });
+      _message('Переведено ${translator.translated} строк. '
+          'Это предпросмотр, файл пока не изменён.');
+    } catch (error) {
+      _message('Не удалось перевести: $error');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   void _changeSection(Workspace value) {
@@ -1389,7 +1413,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 hintText: 'https://…/translate'))),
           SizedBox(width: 135, child: TextField(controller: _apiKey,
             obscureText: true, decoration: const InputDecoration(labelText: 'API-ключ (опц.)'))),
-          OutlinedButton.icon(onPressed: _loading || !file.isJson ? null : _translateJson,
+          OutlinedButton.icon(
+            onPressed: _loading ||
+                !(file.isJson || (Platform.isWindows && file.isKeyValueLocale))
+                ? null : _translateSelectedLocale,
             icon: const Icon(Icons.auto_fix_high, size: 18),
             label: const Text('Перевести до 100 строк')),
         ]),
@@ -1491,7 +1518,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               child: CircularProgressIndicator(strokeWidth: 2))),
       Expanded(child: Text(_state, maxLines: 1, overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 11, color: _muted))),
-      const Text('v0.4.16 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
+      const Text('v0.4.18 α1 · Windows / Android', style: TextStyle(fontSize: 11, color: _cyanAccent)),
     ]),
   );
 

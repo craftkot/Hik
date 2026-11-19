@@ -57,6 +57,27 @@ class GameFile {
   }
 
   bool get isJson => extension == '.json';
+
+  /// Recognize genuine line-based localization, not settings or save files.
+  bool get isKeyValueLocale {
+    if (extension != '.lang' && extension != '.properties') return false;
+    final path = relativePath.toLowerCase().replaceAll('\\', '/');
+    final parts = path.split('/');
+    if (parts.any((part) => const {
+      'config', 'configs', 'save', 'saves', 'userdata', 'backup',
+      'backups', 'cache', 'settings',
+    }.contains(part))) return false;
+    if (parts.any((part) => const {
+      'lang', 'langs', 'language', 'languages', 'locales',
+      'localization', 'translations', 'i18n',
+    }.contains(part))) return true;
+    final basename = name.toLowerCase().split('.').first;
+    return const {
+      'en', 'en_us', 'en_gb', 'english', 'strings',
+      'messages', 'dialogue', 'dialog', 'translation',
+      'translations', 'localization',
+    }.contains(basename);
+  }
 }
 
 /// Decode text conservatively; never allow editing a binary save as garbled UTF-8.
