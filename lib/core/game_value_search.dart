@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'binary_save_editor.dart';
 import 'game_file.dart';
+import 'gzip_save_codec.dart';
 import 'save_value_priority.dart';
 import 'storage_service.dart';
 
@@ -17,6 +18,7 @@ class GameValueHit {
     required this.matchedValue,
     this.numericFormat,
     this.isText = false,
+    this.isCompressed = false,
     this.category = SaveValueCategory.other,
   });
 
@@ -28,11 +30,15 @@ class GameValueHit {
   final String matchedValue;
   final SaveNumberFormat? numericFormat;
   final bool isText;
+  /// The offset refers to decompressed GZIP content, not the on-disk stream.
+  final bool isCompressed;
   /// Naming heuristic, never proof of a game variable.
   final SaveValueCategory category;
 
-  String get location =>
-      isText ? 'символ $offset' : '0x${offset.toRadixString(16)}';
+  String get location {
+    final at = isText ? 'символ $offset' : '0x${offset.toRadixString(16)}';
+    return isCompressed ? 'внутри GZIP: $at' : at;
+  }
 }
 
 class GameSearchSummary {
@@ -108,10 +114,13 @@ class GameValueSearch {
     final format = hit.numericFormat;
     if (hit.isText || format == null || hit.offset < 0) return false;
     try {
+      // Always use the payload represented by the original search result.
+      if (hit.isCompressed != GzipSaveCodec.isGzip(bytes)) return false;
+      final payload = hit.isCompressed ? GzipSaveCodec.decode(bytes) : bytes;
       final expected = BinarySaveEditor.encode(hit.matchedValue, format);
-      if (hit.offset > bytes.length - expected.length) return false;
+      if (hit.offset > payload.length - expected.length) return false;
       for (var i = 0; i < expected.length; i++) {
-        if (bytes[hit.offset + i] != expected[i]) return false;
+        if (payload[hit.offset + i] != expected[i]) return false;
       }
       return true;
     } on FormatException {
@@ -187,7 +196,9 @@ class GameValueSearch {
           await Future<void>.delayed(Duration.zero);
           continue;
         }
-        final text = decodeEditableText(bytes);
+        final isCompressed = GzipSaveCodec.isGzip(bytes);
+        final payload = isCompressed ? GzipSaveCodec.decode(bytes) : bytes;
+        final text = decodeEditableText(payload);
         if (text != null) {
           final lowered = text.toLowerCase();
           final term = value.toLowerCase();
@@ -205,8 +216,9 @@ class GameValueSearch {
             final preview = text.substring(previewStart, previewEnd)
                 .replaceAll(RegExp(r'[\r\n\t]+'), ' ');
             hits.add(GameValueHit(file: file, offset: offset,
-              format: 'UTF-8', preview: preview, matchedValue: value,
-              isText: true,
+              format: isCompressed ? 'GZIP · UTF-8' : 'UTF-8',
+              preview: preview, matchedValue: value,
+              isText: true, isCompressed: isCompressed,
               category: _categoryForText(text, offset, value)));
             inFile++;
           }
@@ -215,15 +227,17 @@ class GameValueSearch {
           for (final entry in needles.entries) {
             if (hits.length >= maxResults || inFile >= maxPerFile) break;
             final needle = entry.value;
-            for (var at = 0; at <= bytes.length - needle.length; at++) {
+            for (var at = 0; at <= payload.length - needle.length; at++) {
               var equal = true;
               for (var i = 0; i < needle.length; i++) {
-                if (bytes[at + i] != needle[i]) { equal = false; break; }
+                if (payload[at + i] != needle[i]) { equal = false; break; }
               }
               if (!equal) continue;
               hits.add(GameValueHit(file: file, offset: at,
-                format: entry.key.label, preview: 'Точное числовое совпадение',
-                matchedValue: value, numericFormat: entry.key));
+                format: isCompressed ? 'GZIP · ${entry.key.label}' : entry.key.label,
+                preview: 'Точное числовое совпадение',
+                matchedValue: value, numericFormat: entry.key,
+                isCompressed: isCompressed));
               inFile++;
               if (hits.length >= maxResults || inFile >= maxPerFile) break;
             }
