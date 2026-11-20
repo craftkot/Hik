@@ -155,6 +155,20 @@ void main() {
     expect(await save.readAsBytes(), original);
   });
 
+  test('matching directories do not consume the 64-file backup limit',
+      () async {
+    final original = await save.readAsBytes();
+    for (var i = 0; i < DesktopSaveRecovery.maxBackups + 1; i++) {
+      await Directory('${save.path}.ehtid-backup-dir-$i.bak').create();
+    }
+    final actual = File('${save.path}.ehtid-backup-real.bak');
+    await actual.writeAsBytes(bytes('previous save'));
+    final found = await recovery.listBackups(save);
+    expect(found, hasLength(1));
+    expect(found.single.file.path, actual.path);
+    expect(await save.readAsBytes(), original);
+  });
+
   test('same bytes do not require restoration', () async {
     final backup = File('${save.path}.ehtid-backup-test.bak');
     await backup.writeAsBytes(await save.readAsBytes());
