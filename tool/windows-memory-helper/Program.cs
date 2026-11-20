@@ -471,6 +471,21 @@ internal static class Program
             if (MatchesComparison("i32", "7331",
                     Encode("i32", "7331"), "changed", out _))
                 throw new InvalidOperationException("Changed comparison returned false positive");
+            var identityHandle = OpenProcess(QueryReadWrite, false, (uint)Environment.ProcessId);
+            if (identityHandle == IntPtr.Zero)
+                throw new InvalidOperationException("Cannot open self for process identity test");
+            try
+            {
+                using var self = Process.GetCurrentProcess();
+                var ticks = self.StartTime.ToUniversalTime().Ticks;
+                VerifyProcessIdentity(identityHandle, ticks, allowSelf: false);
+                bool rejected = false;
+                try { VerifyProcessIdentity(identityHandle, ticks + 1, allowSelf: false); }
+                catch (InvalidOperationException) { rejected = true; }
+                if (!rejected)
+                    throw new InvalidOperationException("Reused PID identity was not rejected");
+            }
+            finally { CloseHandle(identityHandle); }
             return new { ok = true, selfTest =
                 "read, guarded write, readback, restore, relative comparison, bytewise/aligned boundary matching" };
         }
