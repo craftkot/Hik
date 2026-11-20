@@ -50,14 +50,15 @@ class DesktopSaveRecovery {
     await for (final entity in save.parent.list(followLinks: false)) {
       final name = entity.uri.pathSegments.last;
       if (!name.startsWith(prefix) || !name.endsWith('.bak')) continue;
+      if (await FileSystemEntity.type(entity.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        // Directories and symlinks are not backups and must not count
+        // toward the limit for actual recovery candidates.
+        continue;
+      }
       if (result.length >= maxBackups) {
         throw StateError('Найдено больше $maxBackups бэкапов. '
             'Перенеси старые копии в отдельную папку вручную.');
-      }
-      if (await FileSystemEntity.type(entity.path, followLinks: false) !=
-          FileSystemEntityType.file) {
-        // Symlinks must not be offered as recovery candidates.
-        continue;
       }
       final backup = File(entity.path);
       final length = await backup.length();
