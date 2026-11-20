@@ -218,6 +218,29 @@ internal sealed class OverlayForm : Form
     };
 
     private int? Pid => (_games.SelectedItem as GameItem)?.Pid;
+
+    // PID and executable name alone can be recycled by Windows.
+    // Refuse to retain candidates when creation time is inaccessible.
+    private static long? ProcessStartTicks(int pid)
+    {
+        try {
+            using var process = Process.GetProcessById(pid);
+            return process.StartTime.ToUniversalTime().Ticks;
+        }
+        catch (Exception error) when (error is ArgumentException or
+            InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
+    private bool IsSameProcess(int pid)
+    {
+        var game = _games.SelectedItem as GameItem;
+        return game != null && game.Pid == pid &&
+            game.StartTicks is long start &&
+            ProcessStartTicks(pid) == start;
+    }
     private string Format => (_type.SelectedItem as FormatItem)?.Code ?? "i32";
 
     private void ClearSearch()
@@ -303,7 +326,8 @@ internal sealed class OverlayForm : Form
                 new GameItem(
                     x.GetProperty("pid").GetInt32(),
                     x.GetProperty("name").GetString() ?? "",
-                    x.GetProperty("title").GetString() ?? "")).ToArray();
+                    x.GetProperty("title").GetString() ?? "",
+                    ProcessStartTicks(x.GetProperty("pid").GetInt32()))).ToArray();
             var oldGame = _games.SelectedItem as GameItem;
             var oldPid = oldGame?.Pid;
             // Rebuilding ComboBox raises SelectedIndexChanged even when the
@@ -318,7 +342,9 @@ internal sealed class OverlayForm : Form
                         if (_games.Items[i] is GameItem candidate &&
                             candidate.Pid == oldPid.Value &&
                             string.Equals(candidate.Name, oldGame!.Name,
-                                StringComparison.OrdinalIgnoreCase)) {
+                                StringComparison.OrdinalIgnoreCase) &&
+                            candidate.StartTicks is long start &&
+                            oldGame.StartTicks == start) {
                             _games.SelectedIndex = i;
                             break;
                         }
@@ -434,6 +460,11 @@ internal sealed class OverlayForm : Form
         if (!ValidNumber(replacement, Format)) {
             _status.Text = "Неверный формат нового значения"; return;
         }
+        if (!IsSameProcess(pid)) {
+            ClearSearch();
+            _status.Text = "Процесс перезапущен или недоступен. Выбери игру заново.";
+            return;
+        }
         string format = Format;
         string expected = _baselines[_addresses.SelectedIndex];
         if (MessageBox.Show(this,
@@ -444,6 +475,11 @@ internal sealed class OverlayForm : Form
             MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
             return;
 
+        if (!IsSameProcess(pid)) {
+            ClearSearch();
+            _status.Text = "Процесс изменился во время подтверждения. Запись отменена.";
+            return;
+        }
         SetBusy(true, "Проверяю исходные байты и записываю одно значение…");
         try {
             await Request(new { command = "write", pid, format, address,
@@ -465,6 +501,11 @@ internal sealed class OverlayForm : Form
     {
         var restore = _undo;
         if (_busy || restore == null) return;
+        if (!IsSameProcess(restore.Pid)) {
+            ClearSearch();
+            _status.Text = "Откат отменён: процесс перезапущен или недоступен.";
+            return;
+        }
         SetBusy(true, "Восстанавливаю последнее значение…");
         try {
             await Request(new {
@@ -490,7 +531,7 @@ internal sealed class OverlayForm : Form
         UpdateButtons();
     }
 
-    private sealed record GameItem(int Pid, string Name, string WindowTitle)
+    private sealed record GameItem(int Pid, string Name, string WindowTitle, long? StartTicks)
     {
         public override string ToString() => $"{Name} · {WindowTitle} (PID {Pid})";
     }
