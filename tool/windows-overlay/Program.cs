@@ -304,7 +304,8 @@ internal sealed class OverlayForm : Form
                     x.GetProperty("pid").GetInt32(),
                     x.GetProperty("name").GetString() ?? "",
                     x.GetProperty("title").GetString() ?? "")).ToArray();
-            var oldPid = Pid;
+            var oldGame = _games.SelectedItem as GameItem;
+            var oldPid = oldGame?.Pid;
             // Rebuilding ComboBox raises SelectedIndexChanged even when the
             // same process is reselected. Keep RAM candidates and undo in
             // that case; invalidate them only when the PID disappears.
@@ -314,14 +315,19 @@ internal sealed class OverlayForm : Form
                 _games.Items.AddRange(values.Cast<object>().ToArray());
                 if (oldPid.HasValue) {
                     for (int i = 0; i < _games.Items.Count; i++)
-                        if ((_games.Items[i] as GameItem)?.Pid == oldPid.Value) {
+                        if (_games.Items[i] is GameItem candidate &&
+                            candidate.Pid == oldPid.Value &&
+                            string.Equals(candidate.Name, oldGame!.Name,
+                                StringComparison.OrdinalIgnoreCase)) {
                             _games.SelectedIndex = i;
                             break;
                         }
                 }
             }
             finally { _refreshingProcessList = false; }
-            if (oldPid != Pid) ClearSearch();
+            // A recycled PID with a different executable is not the same
+            // game: never keep stale RAM candidates or an undo record.
+            if (oldGame != null && _games.SelectedItem is not GameItem) ClearSearch();
             _status.Text = Pid == null
                 ? $"Видимых окон: {values.Length}. Выбери свою офлайн-игру."
                 : $"Видимых окон: {values.Length}. Выбор PID {Pid} сохранён.";
