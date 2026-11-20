@@ -83,6 +83,15 @@ void main() {
     expect(await save.readAsBytes(), bytes('hp=120;coins=500'));
   });
 
+  test('backup in a nested directory cannot be previewed', () async {
+    final nested = Directory('${save.path}.ehtid-backup-subdir');
+    await nested.create();
+    final foreign = File('${nested.path}${Platform.pathSeparator}foreign.bak');
+    await foreign.writeAsBytes(bytes('untrusted'));
+    await expectLater(recovery.preview(save, foreign), throwsStateError);
+    expect(await save.readAsBytes(), bytes('hp=120;coins=500'));
+  });
+
   test('rejects a backup modified after user has previewed it', () async {
     final original = await save.readAsBytes();
     final edited = bytes('hp=200');
