@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -28,6 +29,31 @@ void main() {
       .where((file) => file is File && file.path.contains(part))
       .cast<File>()
       .toList();
+
+
+  test('second write is rejected while first is checking backup', () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final original = await save.readAsBytes();
+    final writer = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+      if (phase == DesktopSaveCheckpoint.backupVerified) {
+        entered.complete();
+        await release.future;
+      }
+    });
+    final first = writer.write(save, bytes('hp=200'), expected: original);
+    await entered.future;
+    try {
+      await expectLater(
+          writer.write(save, bytes('hp=300'), expected: original),
+          throwsStateError);
+    } finally {
+      release.complete();
+    }
+    await first;
+    expect(await save.readAsBytes(), bytes('hp=200'));
+    expect((await entries('.ehtid-backup-')).length, 1);
+  });
 
   test('successful staged write preserves checked backup and new data',
       () async {
