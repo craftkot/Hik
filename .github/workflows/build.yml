@@ -75,6 +75,8 @@ jobs:
       - name: Build single-file Windows x64 memory helper
         shell: pwsh
         run: dotnet publish tool/windows-memory-helper/EHTID-MemoryHelper.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o build/memory-helper
+      - name: Regression check Windows HUD process identity
+        run: python -m unittest tool/test_overlay_process_identity.py
       - name: Build topmost Windows floating overlay
         shell: pwsh
         run: dotnet publish tool/windows-overlay/EHTID-Overlay.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o build/overlay
