@@ -479,11 +479,15 @@ internal static class Program
                 using var self = Process.GetCurrentProcess();
                 var ticks = self.StartTime.ToUniversalTime().Ticks;
                 VerifyProcessIdentity(identityHandle, ticks, allowSelf: false);
-                bool rejected = false;
-                try { VerifyProcessIdentity(identityHandle, ticks + 1, allowSelf: false); }
-                catch (InvalidOperationException) { rejected = true; }
-                if (!rejected)
-                    throw new InvalidOperationException("Reused PID identity was not rejected");
+                foreach (long? invalidTicks in new long?[] { null, 0, -1, ticks + 1 })
+                {
+                    bool rejected = false;
+                    try { VerifyProcessIdentity(identityHandle, invalidTicks, allowSelf: false); }
+                    catch (InvalidOperationException) { rejected = true; }
+                    if (!rejected)
+                        throw new InvalidOperationException(
+                            "Missing or mismatched process identity was not rejected");
+                }
             }
             finally { CloseHandle(identityHandle); }
             return new { ok = true, selfTest =
