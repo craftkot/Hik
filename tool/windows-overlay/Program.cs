@@ -483,6 +483,7 @@ internal sealed class OverlayForm : Form
         SetBusy(true, "Проверяю исходные байты и записываю одно значение…");
         try {
             await Request(new { command = "write", pid, format, address,
+                processStartTicks = (_games.SelectedItem as GameItem)!.StartTicks,
                 expected, replacement });
             _undo = new UndoRecord(pid, format, address, expected, replacement);
             _expected = replacement;
@@ -510,6 +511,7 @@ internal sealed class OverlayForm : Form
         try {
             await Request(new {
                 command = "write", pid = restore.Pid,
+                processStartTicks = (_games.SelectedItem as GameItem)!.StartTicks,
                 format = restore.Format, address = restore.Address,
                 expected = restore.After, replacement = restore.Before
             });
