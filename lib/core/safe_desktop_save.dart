@@ -61,6 +61,16 @@ class SafeDesktopSaveWriter {
     if (replacement.length > maxLength) {
       throw StateError('Файл больше лимита безопасной записи (8 МиБ)');
     }
+    _busy = true;
+    try {
+      return await _writeLocked(original, replacement, expected: expected);
+    } finally {
+      _busy = false;
+    }
+  }
+
+  Future<String> _writeLocked(File original, Uint8List replacement,
+      {Uint8List? expected}) async {
     // A previous interrupted two-rename swap may have left the original
     // in a rollback file. Never overwrite that evidence with another edit.
     final rollbackPrefix = '${original.uri.pathSegments.last}.ehtid-rollback-';
@@ -76,7 +86,6 @@ class SafeDesktopSaveWriter {
       throw StateError('Исходный сейв отсутствует или является ссылкой');
     }
 
-    _busy = true;
     final unique = '${DateTime.now().microsecondsSinceEpoch}-'
         '${Random.secure().nextInt(0x7fffffff).toRadixString(16)}';
     final backup = File('${original.path}.ehtid-backup-$unique.bak');
@@ -160,7 +169,6 @@ class SafeDesktopSaveWriter {
       } catch (_) {
         // Never mask a write/rollback failure with temporary-file cleanup.
       }
-      _busy = false;
     }
   }
 
