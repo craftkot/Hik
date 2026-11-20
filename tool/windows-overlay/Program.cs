@@ -58,6 +58,7 @@ internal sealed class OverlayForm : Form
     private string? _expected;
     private UndoRecord? _undo;
     private bool _busy;
+    private bool _refreshingProcessList;
 
     public OverlayForm()
     {
@@ -103,7 +104,9 @@ internal sealed class OverlayForm : Form
         _games.Width = 260;
         _games.BackColor = Panel; _games.ForeColor = Color.White;
         _games.FlatStyle = FlatStyle.Popup;
-        _games.SelectedIndexChanged += (_, _) => ClearSearch();
+        _games.SelectedIndexChanged += (_, _) => {
+            if (!_refreshingProcessList) ClearSearch();
+        };
         _games.DropDownWidth = 340;
         _refresh.Width = 75;
         _refresh.Click += async (_, _) => await LoadGames();
@@ -302,14 +305,26 @@ internal sealed class OverlayForm : Form
                     x.GetProperty("name").GetString() ?? "",
                     x.GetProperty("title").GetString() ?? "")).ToArray();
             var oldPid = Pid;
-            _games.Items.Clear();
-            _games.Items.AddRange(values.Cast<object>().ToArray());
-            if (oldPid.HasValue) {
-                for (int i = 0; i < _games.Items.Count; i++)
-                    if ((_games.Items[i] as GameItem)?.Pid == oldPid.Value)
-                        _games.SelectedIndex = i;
+            // Rebuilding ComboBox raises SelectedIndexChanged even when the
+            // same process is reselected. Keep RAM candidates and undo in
+            // that case; invalidate them only when the PID disappears.
+            _refreshingProcessList = true;
+            try {
+                _games.Items.Clear();
+                _games.Items.AddRange(values.Cast<object>().ToArray());
+                if (oldPid.HasValue) {
+                    for (int i = 0; i < _games.Items.Count; i++)
+                        if ((_games.Items[i] as GameItem)?.Pid == oldPid.Value) {
+                            _games.SelectedIndex = i;
+                            break;
+                        }
+                }
             }
-            _status.Text = $"Видимых окон: {values.Length}. Выбери свою офлайн-игру.";
+            finally { _refreshingProcessList = false; }
+            if (oldPid != Pid) ClearSearch();
+            _status.Text = Pid == null
+                ? $"Видимых окон: {values.Length}. Выбери свою офлайн-игру."
+                : $"Видимых окон: {values.Length}. Выбор PID {Pid} сохранён.";
         }
         catch (Exception error) { _status.Text = error.Message; }
         finally { SetBusy(false); }
