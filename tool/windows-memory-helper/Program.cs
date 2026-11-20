@@ -10,6 +10,7 @@ internal sealed class Request
 {
     public string Command { get; set; } = "";
     public int Pid { get; set; }
+    public long? ProcessStartTicks { get; set; }
     public string Format { get; set; } = "i32";
     public string Value { get; set; } = "";
     public string Expected { get; set; } = "";
@@ -354,6 +355,7 @@ internal static class Program
             throw new InvalidOperationException("Cannot write: game may be protected, running online, or inaccessible");
         try
         {
+            VerifyProcessIdentity(handle, request.ProcessStartTicks, allowSelf);
             if (VirtualQueryEx(handle, address, out var region,
                     (nuint)Marshal.SizeOf<MemoryInfo>()) == 0 || region.State != MemCommit ||
                 !Writable(region.Protect))
@@ -366,6 +368,7 @@ internal static class Program
                 ?? throw new InvalidOperationException("Selected address is no longer readable");
             if (!before.AsSpan().SequenceEqual(expected))
                 throw new InvalidOperationException("Value changed in the game. Refine and select again");
+            VerifyProcessIdentity(handle, request.ProcessStartTicks, allowSelf);
             if (!WriteProcessMemory(handle, address, replacement, (nuint)replacement.Length,
                     out var written) || (long)written != replacement.Length)
                 throw new InvalidOperationException("Windows denied write or game changed memory mapping");
@@ -380,6 +383,16 @@ internal static class Program
                 oldValue = request.Expected, newValue = request.Replacement };
         }
         finally { CloseHandle(handle); }
+    }
+
+    private static void VerifyProcessIdentity(nint handle, long? expectedTicks, bool allowSelf)
+    {
+        if (allowSelf) return;
+        if (expectedTicks is not long expected || expected <= 0)
+            throw new InvalidOperationException("Missing game process identity; refresh the game list");
+        if (!GetProcessTimes(handle, out var created, out _, out _, out _) ||
+            DateTime.FromFileTimeUtc(created).Ticks != expected)
+            throw new InvalidOperationException("Game process restarted; RAM write cancelled");
     }
 
     private static object SelfTest()
@@ -458,6 +471,21 @@ internal static class Program
             if (MatchesComparison("i32", "7331",
                     Encode("i32", "7331"), "changed", out _))
                 throw new InvalidOperationException("Changed comparison returned false positive");
+            var identityHandle = OpenProcess(QueryReadWrite, false, (uint)Environment.ProcessId);
+            if (identityHandle == IntPtr.Zero)
+                throw new InvalidOperationException("Cannot open self for process identity test");
+            try
+            {
+                using var self = Process.GetCurrentProcess();
+                var ticks = self.StartTime.ToUniversalTime().Ticks;
+                VerifyProcessIdentity(identityHandle, ticks, allowSelf: false);
+                bool rejected = false;
+                try { VerifyProcessIdentity(identityHandle, ticks + 1, allowSelf: false); }
+                catch (InvalidOperationException) { rejected = true; }
+                if (!rejected)
+                    throw new InvalidOperationException("Reused PID identity was not rejected");
+            }
+            finally { CloseHandle(identityHandle); }
             return new { ok = true, selfTest =
                 "read, guarded write, readback, restore, relative comparison, bytewise/aligned boundary matching" };
         }
@@ -547,6 +575,10 @@ internal static class Program
         public uint Alignment2;
     }
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessTimes(nint handle, out long creationTime,
+        out long exitTime, out long kernelTime, out long userTime);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
     [DllImport("kernel32.dll", SetLastError = true)]
