@@ -30,6 +30,25 @@ class SafeDesktopSaveWriter {
     required Uint8List expectedBackup,
     required bool confirmed,
   }) async {
+    if (_busy) throw StateError('Другая запись сейва ещё выполняется');
+    _busy = true;
+    try {
+      return await _restoreBackupLocked(original, backup,
+          expectedCurrent: expectedCurrent,
+          expectedBackup: expectedBackup,
+          confirmed: confirmed);
+    } finally {
+      _busy = false;
+    }
+  }
+
+  Future<String> _restoreBackupLocked(
+    File original,
+    File backup, {
+    required Uint8List expectedCurrent,
+    required Uint8List expectedBackup,
+    required bool confirmed,
+  }) async {
     if (!confirmed) throw StateError('Восстановление не подтверждено');
     if (!backup.path.startsWith('${original.path}.ehtid-backup-') ||
         !backup.path.endsWith('.bak')) {
@@ -49,7 +68,7 @@ class SafeDesktopSaveWriter {
     if (!_sameBytes(restored, expectedBackup)) {
       throw StateError('Бэкап изменился после предпросмотра. Проверь его заново.');
     }
-    return write(original, restored, expected: expectedCurrent);
+    return _writeLocked(original, restored, expected: expectedCurrent);
   }
 
   Future<String> write(

@@ -55,6 +55,35 @@ void main() {
     expect((await entries('.ehtid-backup-')).length, 1);
   });
 
+  test('restore holds writer lock through backup verification', () async {
+    final original = await save.readAsBytes();
+    final edited = bytes('hp=999');
+    final backupPath = await SafeDesktopSaveWriter()
+        .write(save, edited, expected: original);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final writer = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+      if (phase == DesktopSaveCheckpoint.backupVerified) {
+        entered.complete();
+        await release.future;
+      }
+    });
+    final restoring = writer.restoreBackup(save, File(backupPath),
+        expectedCurrent: edited,
+        expectedBackup: original,
+        confirmed: true);
+    await entered.future;
+    try {
+      await expectLater(
+          writer.write(save, bytes('hp=300'), expected: edited),
+          throwsStateError);
+    } finally {
+      release.complete();
+    }
+    await restoring;
+    expect(await save.readAsBytes(), original);
+  });
+
   test('successful staged write preserves checked backup and new data',
       () async {
     final original = await save.readAsBytes();
