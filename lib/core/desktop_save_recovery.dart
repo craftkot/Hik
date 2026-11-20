@@ -79,7 +79,9 @@ class DesktopSaveRecovery {
   }
 
   Future<DesktopBackupPreview> preview(File save, File backup) async {
-    if (!backup.path.startsWith('${save.path}.ehtid-backup-') ||
+    if (backup.parent.absolute.path != save.parent.absolute.path ||
+        !backup.uri.pathSegments.last.startsWith(
+            '${save.uri.pathSegments.last}.ehtid-backup-') ||
         !backup.path.endsWith('.bak')) {
       throw StateError('Этот бэкап не относится к выбранному сейву');
     }
