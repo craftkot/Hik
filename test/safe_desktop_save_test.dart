@@ -84,6 +84,34 @@ void main() {
     expect(await entries('.ehtid-rollback-'), isEmpty);
   });
 
+  test('path aliases cannot bypass cross-instance save lock', () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final original = await save.readAsBytes();
+    final writer = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+      if (phase == DesktopSaveCheckpoint.backupVerified) {
+        entered.complete();
+        await release.future;
+      }
+    });
+    final first = writer.write(save, bytes('hp=200'), expected: original);
+    await entered.future;
+    try {
+      final alias = File('${scratch.path}${Platform.pathSeparator}subdir'
+          '${Platform.pathSeparator}..${Platform.pathSeparator}world.sav');
+      await expectLater(
+          SafeDesktopSaveWriter().write(
+              alias, bytes('hp=300'), expected: original),
+          throwsStateError);
+      expect(await save.readAsBytes(), original);
+      expect((await entries('.ehtid-backup-')).length, 1);
+    } finally {
+      release.complete();
+    }
+    await first;
+    expect(await save.readAsBytes(), bytes('hp=200'));
+  });
+
   test('another writer cannot write while backup restore is running',
       () async {
     final original = await save.readAsBytes();
