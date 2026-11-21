@@ -42,6 +42,15 @@ class _GzipGameStorage implements GameStorage {
   }
 }
 
+class _BinaryGzipGameStorage extends _GzipGameStorage {
+  _BinaryGzipGameStorage() {
+    bytes = Uint8List.fromList(gzip.encode([
+      0xff, 0x00, ...ascii.encode('gold=120'), 0,
+      0x81, ...ascii.encode('hp=080'), 0xaa,
+    ]));
+  }
+}
+
 void main() {
   testWidgets('GZIP JSON opens as important rows and saves repacked value',
       (tester) async {
@@ -93,5 +102,48 @@ void main() {
     expect(find.byType(TextField), findsWidgets);
     expect(find.byTooltip('Вернуться к списку важных параметров'),
         findsOneWidget);
+  });
+
+  testWidgets('Opaque GZIP can edit explicit fixed-width named number',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 1050);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final storage = _BinaryGzipGameStorage();
+    final before = GzipSaveCodec.decode(storage.bytes);
+
+    await tester.pumpWidget(MaterialApp(home: GameLabHome(storage: storage)));
+    await tester.tap(find.text('Редактор сохранений'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Открыть папку игры'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SaveData015.gz').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('ВАЖНЫЕ ПАРАМЕТРЫ'), findsOneWidget);
+    expect(find.text('gold'), findsOneWidget);
+    expect(find.text('hp'), findsOneWidget);
+    expect(find.text('HEX-ПРОСМОТР'), findsNothing);
+
+    await tester.tap(find.text('gold'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '999');
+    await tester.tap(find.text('Проверить правку'));
+    await tester.pumpAndSettle();
+    expect(find.text('Подтвердить изменение сейва'), findsOneWidget);
+    expect(storage.writes, 0);
+    await tester.tap(find.text('Создать копию и применить'));
+    await tester.pumpAndSettle();
+    expect(storage.writes, 1);
+    expect(storage.verifiedExpected, isTrue);
+    final after = GzipSaveCodec.decode(storage.bytes);
+    expect(after.length, before.length);
+    expect(latin1.decode(after), contains('gold=999'));
+    expect(latin1.decode(after), contains('hp=080'));
+    for (var i = 0; i < before.length; i++) {
+      if (i >= 8 && i < 11) continue;
+      expect(after[i], before[i], reason: 'Unexpected byte change at $i');
+    }
   });
 }
