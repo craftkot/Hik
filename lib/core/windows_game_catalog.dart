@@ -68,7 +68,7 @@ class WindowsGameCatalog {
         // Older clients use numbered keys with a library path value.
         final legacy = RegExp(r'"[0-9]+"\s*"([^"]+)"');
         for (final match in [...modern.allMatches(text), ...legacy.allMatches(text)]) {
-          final raw = match.group(1)!.replaceAll(r'\\', r'\').trim();
+          final raw = match.group(1)!.replaceAll(String.fromCharCodes([92, 92]), String.fromCharCode(92)).trim();
           if (p.isAbsolute(raw)) addLibrary(raw);
         }
       } on FileSystemException {
