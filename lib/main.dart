@@ -321,7 +321,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
-        _desktopGame = null; _showGameHub = Platform.isWindows;
+        _desktopGame = null; // Preserve current view when opening a folder.
         _windowsFoundSaveRoots.clear();
         _windowsFoundSaveFileIds.clear();
         _query.clear();
