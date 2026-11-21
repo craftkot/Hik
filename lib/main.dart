@@ -15,6 +15,7 @@ import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/ini_save_editor.dart';
+import 'core/important_save_fields.dart';
 import 'core/storage_service.dart';
 import 'core/save_value_priority.dart';
 import 'core/translation_service.dart';
@@ -32,6 +33,7 @@ import 'widgets/android_container_lab.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 import 'widgets/ini_save_field_browser.dart';
+import 'widgets/important_save_panel.dart';
 import 'widgets/windows_game_picker.dart';
 import 'widgets/windows_game_hub.dart';
 
@@ -128,6 +130,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   // The original on-disk bytes stay in _bytes for expected-byte backup writes.
   Uint8List? _gzipPayload;
   String? _gzipError;
+  List<ImportantSaveField> _importantEntries = const [];
+  bool _showRawSave = false;
   ArchiveInspector? _archive;
   ArchiveEntry? _archiveEntry;
   Uint8List? _archiveEntryBytes;
@@ -760,6 +764,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _archiveEntryBytes = null;
         _originalText = decoded;
         _editor.text = decoded ?? '';
+        _importantEntries = decoded != null
+            ? ImportantSaveInspector.inspectText(decoded)
+            : gzipError == null && !isLarge && inspector == null && !file.isImage
+                ? ImportantSaveInspector.inspectBinary(unpacked ?? bytes)
+                : const [];
+        _showRawSave = false;
         _dirty = false;
         _mobilePreview = true;
         _state = 'Открыт ${file.relativePath}';
@@ -819,7 +829,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() { _bytes = bytes; _gzipPayload =
           GzipSaveCodec.isGzip(bytes) ? payload : null;
-        _originalText = _editor.text; _dirty = false; });
+        _originalText = _editor.text; _dirty = false;
+        _importantEntries = ImportantSaveInspector.inspectText(_editor.text);
+      });
       _message('Применено! Резервная копия: $backup');
     } catch (error) { _message('Запись отменена / ошибка: $error'); }
     finally { if (mounted) setState(() => _loading = false); }
@@ -946,6 +958,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _bytes = patched; _gzipPayload = updatedGzipPayload;
+        _importantEntries = ImportantSaveInspector.inspectBinary(
+            updatedGzipPayload ?? patched);
         _state = 'Бинарный сейв обновлён'; });
       _message('Записано и проверено. Бэкап: $backup');
     } catch (error) {
@@ -1038,7 +1052,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     try {
       final next = IniSaveEditor.changeNumber(_editor.text, field, updated);
       if (!mounted) return false;
-      setState(() => _editor.text = next);
+      setState(() {
+        _editor.text = next;
+        _importantEntries = ImportantSaveInspector.inspectText(next);
+      });
       return true;
     } catch (error) {
       _message('Поле INI не изменено: $error');
@@ -1112,7 +1129,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       try {
         final next = changeJsonField(_editor.text, field.pointer, updated);
         if (!mounted) return false;
-        setState(() => _editor.text = next);
+        setState(() {
+          _editor.text = next;
+          _importantEntries = ImportantSaveInspector.inspectText(next);
+        });
         return true;
       } catch (error) {
         _message('Поле не изменено: $error');
@@ -1519,6 +1539,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         (file.extension == '.ini' || file.extension == '.cfg') &&
         (file.isSave || file.isStructuredIniSaveCandidate ||
             _windowsFoundSaveFileIds.contains(file.id));
+    final showImportantSave = _section == Workspace.saves &&
+        !_showRawSave && _archive == null && _gzipError == null &&
+        !file.isImage && file.size <= maxEditableBytes;
     final canUseJsonEditor = canEdit &&
         (_section == Workspace.saves || _section == Workspace.localize) &&
         (file.isJson || _editor.text.trimLeft().startsWith('{') ||
@@ -1557,6 +1580,18 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               tooltip: 'Поиск чисел в бинарном сейве',
               onPressed: _loading ? null : _showBinarySaveEditor,
               icon: const Icon(Icons.manage_search, color: _accent)),
+            if (_section == Workspace.saves && _showRawSave &&
+                _archive == null && _gzipError == null &&
+                file.size <= maxEditableBytes)
+              IconButton(
+                tooltip: 'Вернуться к списку важных параметров',
+                onPressed: () => setState(() {
+                  _importantEntries = _originalText != null
+                      ? ImportantSaveInspector.inspectText(_editor.text)
+                      : ImportantSaveInspector.inspectBinary(_gzipPayload ?? bytes);
+                  _showRawSave = false;
+                }),
+                icon: const Icon(Icons.list_alt_rounded, color: _accent)),
             if (_dirty) IconButton(
               tooltip: 'Отменить несохранённые правки',
               onPressed: () => _editor.text = _originalText ?? '',
@@ -1572,7 +1607,15 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         if (_section == Workspace.localize && canEdit)
           _translationToolbar(file),
         const Divider(height: 1, color: Color(0xFF302B42)),
-        Expanded(child: _archive != null
+        Expanded(child: showImportantSave
+            ? ImportantSavePanel(
+                entries: _importantEntries,
+                isBinary: !canEdit,
+                onEdit: _editImportantSaveField,
+                onShowRaw: () => setState(() => _showRawSave = true),
+                onSearchBinary: canBinaryEdit ? _showBinarySaveEditor : null,
+              )
+            : _archive != null
             ? _archiveBrowser(narrow: narrow)
             : imagePreview
             ? Center(child: InteractiveViewer(
