@@ -142,7 +142,7 @@ void main() {
     expect(latin1.decode(after), contains('gold=999'));
     expect(latin1.decode(after), contains('hp=080'));
     for (var i = 0; i < before.length; i++) {
-      if (i >= 8 && i < 11) continue;
+      if (i >= 7 && i < 10) continue;
       expect(after[i], before[i], reason: 'Unexpected byte change at $i');
     }
   });
