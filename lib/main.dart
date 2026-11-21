@@ -1262,7 +1262,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           child: Tooltip(
             message: 'Меню игры',
-            child: ListTile(
+            child: Material(color: Colors.transparent,
+              child: ListTile(
               dense: true,
               selected: _showGameHub,
               leading: const Icon(Icons.grid_view_rounded, color: _accent),
@@ -1274,7 +1275,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 }
                 setState(() => _showGameHub = true);
               },
-            ),
+            )),
           )),
       for (final section in Workspace.values)
         if (Platform.isAndroid || section != Workspace.container)
