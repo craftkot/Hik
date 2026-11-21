@@ -113,7 +113,6 @@ class WindowsGameHub extends StatelessWidget {
               _action(Icons.folder_zip_outlined, 'Ресурсы',
                 'Просмотр файлов, архивов и предзагрузок', onResources),
             ]),
-          ),
           const SizedBox(height: 16),
           Center(child: TextButton.icon(
             onPressed: busy ? null : onFindSaves,
