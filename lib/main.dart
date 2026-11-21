@@ -16,6 +16,7 @@ import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/ini_save_editor.dart';
 import 'core/important_save_fields.dart';
+import 'core/lossless_json_number_editor.dart';
 import 'core/storage_service.dart';
 import 'core/save_value_priority.dart';
 import 'core/translation_service.dart';
@@ -881,9 +882,60 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     }
   }
 
+  Future<bool> _editImportantJsonNumber(JsonField field) async {
+    final expected = field.value;
+    if (expected is! num || !expected.isFinite) return false;
+    var typed = field.preview;
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить поле'),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SelectableText(field.pointer,
+              style: const TextStyle(fontSize: 12, color: _muted)),
+            const SizedBox(height: 14),
+            TextFormField(
+              initialValue: field.preview,
+              autofocus: true,
+              onChanged: (value) => typed = value,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              decoration: const InputDecoration(labelText: 'Число JSON'),
+            ),
+            const SizedBox(height: 8),
+            const Text('Меняется только выбранное число. Пробелы, '
+                'порядок и все остальные поля остаются как были.',
+              style: TextStyle(fontSize: 11, color: _muted)),
+          ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, typed),
+            child: const Text('Изменить')),
+        ],
+      ),
+    );
+    if (updated == null || !mounted) return false;
+    try {
+      final newText = LosslessJsonNumberEditor.change(_editor.text,
+          pointer: field.pointer, expected: expected,
+          replacement: updated);
+      if (newText == _editor.text || !mounted) return false;
+      setState(() {
+        _editor.text = newText;
+        _importantEntries = ImportantSaveInspector.inspectText(newText);
+      });
+      return true;
+    } catch (error) {
+      _message('Поле не изменено: $error');
+      return false;
+    }
+  }
+
   Future<bool> _editImportantSaveField(ImportantSaveField entry) async {
     if (_loading) return false;
-    if (entry.json != null) return _editJsonField(entry.json!);
+    if (entry.json != null) return _editImportantJsonNumber(entry.json!);
     if (entry.ini != null) return _editIniNumber(entry.ini!);
     final field = entry.embedded;
     final file = _selected;
