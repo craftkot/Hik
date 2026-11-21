@@ -55,6 +55,65 @@ void main() {
     expect((await entries('.ehtid-backup-')).length, 1);
   });
 
+  test('different writer instances cannot edit the same save concurrently',
+      () async {
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final original = await save.readAsBytes();
+    final firstWriter = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+      if (phase == DesktopSaveCheckpoint.backupVerified) {
+        entered.complete();
+        await release.future;
+      }
+    });
+    final first = firstWriter.write(save, bytes('hp=200'), expected: original);
+    await entered.future;
+    try {
+      await expectLater(
+          SafeDesktopSaveWriter().write(
+              File(save.absolute.path), bytes('hp=300'), expected: original),
+          throwsStateError);
+      expect(await save.readAsBytes(), original);
+      expect((await entries('.ehtid-backup-')).length, 1);
+    } finally {
+      release.complete();
+    }
+    await first;
+    expect(await save.readAsBytes(), bytes('hp=200'));
+    expect(await entries('.ehtid-pending-'), isEmpty);
+    expect(await entries('.ehtid-rollback-'), isEmpty);
+  });
+
+  test('another writer cannot write while backup restore is running',
+      () async {
+    final original = await save.readAsBytes();
+    final edited = bytes('hp=999');
+    final backup = await SafeDesktopSaveWriter()
+        .write(save, edited, expected: original);
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final restoringWriter = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+      if (phase == DesktopSaveCheckpoint.backupVerified) {
+        entered.complete();
+        await release.future;
+      }
+    });
+    final restoring = restoringWriter.restoreBackup(save, File(backup),
+        expectedCurrent: edited,
+        expectedBackup: original,
+        confirmed: true);
+    await entered.future;
+    try {
+      await expectLater(
+          SafeDesktopSaveWriter().write(save, bytes('hp=300'), expected: edited),
+          throwsStateError);
+    } finally {
+      release.complete();
+    }
+    await restoring;
+    expect(await save.readAsBytes(), original);
+  });
+
   test('restore holds writer lock through backup verification', () async {
     final original = await save.readAsBytes();
     final edited = bytes('hp=999');
