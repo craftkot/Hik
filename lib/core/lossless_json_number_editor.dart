@@ -100,7 +100,7 @@ class _JsonNumberSpanFinder {
     var terminated = false;
     while (i < source.length) {
       final char = source[i++];
-      if (char == r'\') {
+      if (char.codeUnitAt(0) == 0x5c) {
         if (i >= source.length) break;
         i++;
       } else if (char == '"') {
