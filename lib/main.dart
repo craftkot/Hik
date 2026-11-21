@@ -19,6 +19,7 @@ import 'core/storage_service.dart';
 import 'core/save_value_priority.dart';
 import 'core/translation_service.dart';
 import 'core/windows_save_discovery.dart';
+import 'core/windows_game_catalog.dart';
 import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
 import 'widgets/onscreen_number_picker.dart';
@@ -31,6 +32,8 @@ import 'widgets/android_container_lab.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 import 'widgets/ini_save_field_browser.dart';
+import 'widgets/windows_game_picker.dart';
+import 'widgets/windows_game_hub.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -109,6 +112,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   final TextEditingController _apiKey = TextEditingController();
 
   Workspace _section = Workspace.preloads;
+  bool _showGameHub = Platform.isWindows;
+  DesktopGameEntry? _desktopGame;
   String? _folder;
   InstalledGameApp? _selectedApp;
   String? _overlayNumber;
@@ -261,6 +266,51 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _chooseDesktopGame() async {
+    if (!Platform.isWindows || _loading) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки перед сменой игры');
+      return;
+    }
+    try {
+      final games = await WindowsGameCatalog.discover();
+      if (!mounted) return;
+      if (games.isEmpty) {
+        _message('В стандартных каталогах Steam игр не найдено. '
+            'Можно выбрать папку игры вручную.');
+        return;
+      }
+      final chosen = await showWindowsGamePicker(context, games);
+      if (!mounted || chosen == null) return;
+      setState(() {
+        _folder = chosen.folder;
+        _desktopGame = chosen;
+        _showGameHub = true;
+        _selectedApp = null;
+        _extraFolders.clear();
+        _windowsFoundSaveRoots.clear();
+        _windowsFoundSaveFileIds.clear();
+        _query.clear();
+        _selected = null; _bytes = null; _gzipPayload = null;
+        _gzipError = null; _originalText = null;
+        _mobilePreview = false; _files = []; _profile = null;
+        _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
+      });
+      await _scan();
+    } catch (error) {
+      _message('Не удалось выбрать установленную игру: $error');
+    }
+  }
+
+  void _openGameSection(Workspace section) {
+    if (_dirty) {
+      _message('Сначала примени или отмени изменения в файле');
+      return;
+    }
+    _changeSection(section);
+    if (_showGameHub) setState(() => _showGameHub = false);
+  }
+
   Future<void> _chooseFolder() async {
     try {
       final folder = await _storage.chooseFolder();
@@ -271,6 +321,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
+        _desktopGame = null; _showGameHub = Platform.isWindows;
         _windowsFoundSaveRoots.clear();
         _windowsFoundSaveFileIds.clear();
         _query.clear();
@@ -1145,9 +1196,31 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 storage: _storage),
             Expanded(child: Padding(
               padding: EdgeInsets.all(compact ? 10 : 20),
-              child: _section == Workspace.cheats
-                  ? _cheatsView()
-                  : _workspaceView(compact),
+              child: Platform.isWindows && _showGameHub
+                  ? WindowsGameHub(
+                      folder: _folder,
+                      gameName: _desktopGame?.name ??
+                        (_folder == null ? null :
+                          WindowsSaveDiscovery.suggestedGameNameFromPath(_folder!)),
+                      engine: _profile?.engine,
+                      fileCount: _files.length,
+                      busy: _loading,
+                      onChooseInstalled: _chooseDesktopGame,
+                      onChooseFolder: _chooseFolder,
+                      onSaves: () => _openGameSection(Workspace.saves),
+                      onCheats: () => _openGameSection(Workspace.cheats),
+                      onTranslation: () => _openGameSection(Workspace.localize),
+                      onResources: () => _openGameSection(Workspace.preloads),
+                      onFindSaves: () async {
+                        await _findWindowsSaveFolders();
+                        if (mounted && _folder != null) {
+                          _openGameSection(Workspace.saves);
+                        }
+                      },
+                    )
+                  : _section == Workspace.cheats
+                    ? _cheatsView()
+                    : _workspaceView(compact),
             )),
             _statusBar(),
           ])),
@@ -1185,6 +1258,24 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         ])),
       const Divider(height: 1, color: Color(0xFF2D293C)),
       const SizedBox(height: 20),
+      if (Platform.isWindows)
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          child: Tooltip(
+            message: 'Меню игры',
+            child: ListTile(
+              dense: true,
+              selected: _showGameHub,
+              leading: const Icon(Icons.grid_view_rounded, color: _accent),
+              title: compact ? null : const Text('Моя игра'),
+              onTap: () {
+                if (_dirty) {
+                  _message('Сначала примени или отмени изменения в файле');
+                  return;
+                }
+                setState(() => _showGameHub = true);
+              },
+            ),
+          )),
       for (final section in Workspace.values)
         if (Platform.isAndroid || section != Workspace.container)
           Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1192,7 +1283,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             child: Material(color: _section == section ? _panelLight : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
               child: InkWell(borderRadius: BorderRadius.circular(12),
-                onTap: () => _changeSection(section),
+                onTap: () => _openGameSection(section),
                 child: Padding(padding: EdgeInsets.symmetric(
                     horizontal: compact ? 17 : 12, vertical: 14),
                   child: Row(children: [
@@ -1229,15 +1320,15 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     child: Row(children: [
       if (!compact) Expanded(child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [Text(_section.title, maxLines: 1,
+        children: [Text(_showGameHub ? 'Моя игра' : _section.title, maxLines: 1,
           overflow: TextOverflow.ellipsis, style: const TextStyle(
           fontSize: 23, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text(_section.detail, maxLines: 2,
+          Text(_showGameHub ? 'Выбор игры и инструменты' : _section.detail, maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12, color: _muted))],
       )),
-      if (compact) Expanded(child: Text(_section.title, maxLines: 2,
+      if (compact) Expanded(child: Text(_showGameHub ? 'Моя игра' : _section.title, maxLines: 2,
         style: const TextStyle(fontWeight: FontWeight.w700))),
       if (_profile != null && !compact) Padding(
         padding: const EdgeInsets.only(right: 10),
@@ -1247,9 +1338,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (_folder != null && !compact) Padding(
         padding: const EdgeInsets.only(right: 12),
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
-          child: Text(_selectedApp?.label ?? _folder!, overflow: TextOverflow.ellipsis,
+          child: Text(_selectedApp?.label ?? _desktopGame?.name ?? _folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
-      if (Platform.isWindows &&
+      if (Platform.isWindows && !_showGameHub &&
           (_section == Workspace.saves || _section == Workspace.localize))
         if (compact || _folder != null)
           IconButton(
@@ -1269,7 +1360,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             tooltip: 'Добавить папку с сейвами',
             icon: const Icon(Icons.create_new_folder_outlined)),
       ],
-      if (_section != Workspace.container)
+      if (_section != Workspace.container && !_showGameHub)
         IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
       if (Platform.isAndroid && _section != Workspace.container) ...[
@@ -1285,6 +1376,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           icon: const Icon(Icons.sports_esports_outlined),
         ),
       ],
+      if (Platform.isWindows && !_showGameHub)
+        IconButton(
+          onPressed: _loading ? null : _chooseDesktopGame,
+          tooltip: 'Выбрать установленную игру',
+          icon: const Icon(Icons.sports_esports_outlined)),
       if (_section != Workspace.container) const SizedBox(width: 6),
       if (_section != Workspace.container)
         FilledButton.icon(
