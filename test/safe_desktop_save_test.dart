@@ -144,7 +144,7 @@ void main() {
   test('Windows junction aliases share the same writer lock', () async {
     final aliasPath = '${scratch.path}${Platform.pathSeparator}junction';
     final created = await Process.run(
-        'cmd', ['/c', 'mklink', '/J', '"$aliasPath"', '"${scratch.path}"']);
+        'cmd', ['/c', 'mklink', '/J', aliasPath, scratch.path]);
     expect(created.exitCode, 0,
         reason: 'Windows junction creation failed: ${created.stderr}');
     try {
