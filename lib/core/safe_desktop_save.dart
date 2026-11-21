@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:path/path.dart' as p;
+
 /// Stages where tests may inject a storage failure.
 /// Windows uses a recoverable two-rename sequence, not atomic replacement.
 enum DesktopSaveCheckpoint {
@@ -22,7 +24,8 @@ class SafeDesktopSaveWriter {
   static final Set<String> _activeSavePaths = <String>{};
 
   static String _saveKey(File file) {
-    final absolute = file.absolute.path;
+    // Different spellings (e.g. folder/../save.sav) must share a lock.
+    final absolute = p.normalize(file.absolute.path);
     return Platform.isWindows ? absolute.toLowerCase() : absolute;
   }
 
