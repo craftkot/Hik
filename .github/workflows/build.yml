@@ -5,6 +5,12 @@ on:
     branches: [main, master]
   pull_request:
 
+# New commits supersede obsolete pull-request builds. Do not cancel main
+# releases when another push occurs while packaging.
+concurrency:
+  group: game-lab-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   android:
     runs-on: ubuntu-latest
