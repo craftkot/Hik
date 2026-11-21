@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:game_lab/core/game_file.dart';
 import 'package:game_lab/core/storage_service.dart';
 import 'package:game_lab/main.dart';
+import 'package:game_lab/widgets/save_field_browser.dart';
 
 class _PriorityStorage implements GameStorage {
   static const source = '{"player":{"name":"Test","quest":42,'
@@ -50,19 +51,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Важные поля сначала'), findsOneWidget);
-    expect(find.text('/player/gold'), findsOneWidget);
-    expect(find.text('/player/hp'), findsOneWidget);
-    expect(find.text('/player/strength'), findsOneWidget);
-    // Category filter and the field badge both display this label.
-    expect(find.text('Валюта'), findsNWidgets(2));
-    expect(find.text('HP / здоровье'), findsNWidgets(2));
-    final gold = tester.getTopLeft(find.text('/player/gold')).dy;
-    final hp = tester.getTopLeft(find.text('/player/hp')).dy;
-    final strength = tester.getTopLeft(find.text('/player/strength')).dy;
+    // The new inline important-fields list remains visible behind the
+    // modal. Scope the legacy ordering assertions to SaveFieldBrowser.
+    final modal = find.byType(SaveFieldBrowser);
+    Finder inside(String label) => find.descendant(
+        of: modal, matching: find.text(label));
+    expect(inside('/player/gold'), findsOneWidget);
+    expect(inside('/player/hp'), findsOneWidget);
+    expect(inside('/player/strength'), findsOneWidget);
+    expect(inside('Валюта'), findsNWidgets(2));
+    expect(inside('HP / здоровье'), findsNWidgets(2));
+    final gold = tester.getTopLeft(inside('/player/gold')).dy;
+    final hp = tester.getTopLeft(inside('/player/hp')).dy;
+    final strength = tester.getTopLeft(inside('/player/strength')).dy;
     expect(gold, lessThan(hp));
     expect(hp, lessThan(strength));
 
-    await tester.tap(find.text('/player/gold'));
+    await tester.tap(inside('/player/gold'));
     await tester.pumpAndSettle();
     expect(find.text('Изменить поле'), findsOneWidget);
     expect(find.byType(TextField), findsWidgets);
