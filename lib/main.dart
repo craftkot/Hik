@@ -881,6 +881,127 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     }
   }
 
+  Future<bool> _editImportantSaveField(ImportantSaveField entry) async {
+    if (_loading) return false;
+    if (entry.json != null) return _editJsonField(entry.json!);
+    if (entry.ini != null) return _editIniNumber(entry.ini!);
+    final field = entry.embedded;
+    final file = _selected;
+    final original = _bytes;
+    if (field == null || file == null || original == null || _dirty) {
+      return false;
+    }
+    var typed = field.value;
+    final replacement = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить поле бинарного сейва'),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(field.key, style: const TextStyle(
+                fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Текущее значение: ' + field.value),
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: field.value,
+              autofocus: true,
+              onChanged: (next) => typed = next,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              decoration: const InputDecoration(labelText: 'Новое число'),
+            ),
+            const SizedBox(height: 8),
+            const Text('Бинарный формат: можно заменить только число '
+                'той же длины, не сдвигая остальные байты.',
+              style: TextStyle(fontSize: 12)),
+          ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, typed),
+              child: const Text('Проверить правку')),
+        ],
+      ),
+    );
+    if (replacement == null || !mounted) return false;
+
+    Uint8List patchedPayload;
+    Uint8List patched;
+    try {
+      if (_selected?.id != file.id || !identical(_bytes, original)) {
+        throw StateError('Файл изменился после открытия');
+      }
+      if (GzipSaveCodec.isGzip(original) && _gzipPayload == null) {
+        throw StateError('GZIP повреждён. Запись запрещена');
+      }
+      patchedPayload = ImportantSaveInspector.patchEmbedded(
+          _gzipPayload ?? original, field, replacement);
+      patched = _gzipPayload == null
+          ? patchedPayload : GzipSaveCodec.encode(patchedPayload);
+      if (_bytesEqual(original, patched)) {
+        _message('Значение не изменилось');
+        return false;
+      }
+    } catch (error) {
+      _message('Изменение отменено: $error');
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Подтвердить изменение сейва'),
+        content: Text(
+          'Файл: ' + file.relativePath + '\n' +
+          'Поле: ' + field.key + '\n' +
+          field.value + ' → ' + replacement.trim() + '\n\n' +
+          'Сначала создадим резервную копию. '
+          'Неизвестная внутренняя контрольная сумма игры '
+          'может помешать загрузке. Закрой игру перед записью.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Создать копию и применить')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    setState(() => _loading = true);
+    try {
+      if (_selected?.id != file.id || !identical(_bytes, original)) {
+        throw StateError('Открытый файл сменился');
+      }
+      final disk = await _storage.read(file);
+      if (!_bytesEqual(disk, original)) {
+        throw StateError('Исходный сейв изменился. Открой его заново.');
+      }
+      final backup = await _storage.writeWithBackup(
+          file, patched, expected: original);
+      final verify = await _storage.read(file);
+      if (!_bytesEqual(verify, patched)) {
+        throw StateError('Проверка записи не прошла. Бэкап: $backup');
+      }
+      if (!mounted) return false;
+      setState(() {
+        _bytes = patched;
+        _gzipPayload = GzipSaveCodec.isGzip(patched)
+            ? patchedPayload : null;
+        _importantEntries = ImportantSaveInspector.inspectBinary(patchedPayload);
+        _state = 'Изменено поле ' + field.key;
+      });
+      _message('Изменение проверено. Бэкап: $backup');
+      return true;
+    } catch (error) {
+      _message('Запись отменена: $error');
+      return false;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   Future<void> _showBinarySaveEditor() async {
     final file = _selected;
     final original = _bytes;
