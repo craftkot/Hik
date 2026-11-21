@@ -38,7 +38,7 @@ void main() {
     await File(p.join(apps.path, 'appmanifest_2.acf'))
         .writeAsString('"name" "Missing" "installdir" "NoGame"');
     await File(p.join(apps.path, 'appmanifest_3.acf'))
-        .writeAsString('bad' * 100000);
+        .writeAsString(List.filled(100000, 'bad').join());
     final games = await WindowsGameCatalog.discoverUnderRoots([root.path]);
     expect(games, isEmpty);
   });
