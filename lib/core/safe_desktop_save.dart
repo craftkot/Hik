@@ -17,6 +17,29 @@ class SafeDesktopSaveWriter {
 
   final FutureOr<void> Function(DesktopSaveCheckpoint)? onCheckpoint;
   bool _busy = false;
+  // Serializes writes to the same save across writer instances in this isolate.
+  // This is not an inter-process lock: close the game before editing.
+  static final Set<String> _activeSavePaths = <String>{};
+
+  static String _saveKey(File file) {
+    final absolute = file.absolute.path;
+    return Platform.isWindows ? absolute.toLowerCase() : absolute;
+  }
+
+  String _acquire(File original) {
+    if (_busy) throw StateError('Другая запись сейва ещё выполняется');
+    final key = _saveKey(original);
+    if (!_activeSavePaths.add(key)) {
+      throw StateError('Этот сейв уже изменяется другой операцией');
+    }
+    _busy = true;
+    return key;
+  }
+
+  void _release(String key) {
+    _busy = false;
+    _activeSavePaths.remove(key);
+  }
   static const int maxLength = 8 * 1024 * 1024;
 
   /// Restores only a backup created for this exact save path.
@@ -30,15 +53,14 @@ class SafeDesktopSaveWriter {
     required Uint8List expectedBackup,
     required bool confirmed,
   }) async {
-    if (_busy) throw StateError('Другая запись сейва ещё выполняется');
-    _busy = true;
+    final lockKey = _acquire(original);
     try {
       return await _restoreBackupLocked(original, backup,
           expectedCurrent: expectedCurrent,
           expectedBackup: expectedBackup,
           confirmed: confirmed);
     } finally {
-      _busy = false;
+      _release(lockKey);
     }
   }
 
@@ -76,15 +98,14 @@ class SafeDesktopSaveWriter {
     Uint8List replacement, {
     Uint8List? expected,
   }) async {
-    if (_busy) throw StateError('Другая запись сейва ещё выполняется');
     if (replacement.length > maxLength) {
       throw StateError('Файл больше лимита безопасной записи (8 МиБ)');
     }
-    _busy = true;
+    final lockKey = _acquire(original);
     try {
       return await _writeLocked(original, replacement, expected: expected);
     } finally {
-      _busy = false;
+      _release(lockKey);
     }
   }
 
