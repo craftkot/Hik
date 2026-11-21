@@ -26,7 +26,15 @@ class SafeDesktopSaveWriter {
   static String _saveKey(File file) {
     // Different spellings (e.g. folder/../save.sav) must share a lock.
     final absolute = p.normalize(file.absolute.path);
-    return Platform.isWindows ? absolute.toLowerCase() : absolute;
+    // Directory junctions/symlinks can name the same existing save.
+    // Resolve them before locking; keep the lexical key if resolution fails.
+    String canonical;
+    try {
+      canonical = File(absolute).resolveSymbolicLinksSync();
+    } on FileSystemException {
+      canonical = absolute;
+    }
+    return Platform.isWindows ? canonical.toLowerCase() : canonical;
   }
 
   String _acquire(File original) {
