@@ -15,11 +15,13 @@ class _FakeRecovery extends DesktopSaveRecovery {
   final Uint8List before = Uint8List.fromList([104, 112, 61, 49, 50, 48]);
   final Uint8List after = Uint8List.fromList([104, 112, 61, 57, 57, 57]);
   bool restored = false;
+  bool failListing = false;
   int calls = 0;
 
   @override
   Future<List<DesktopBackupEntry>> listBackups(File original) async {
     expect(original.path, save.path);
+    if (failListing) throw StateError('test listing failure');
     return [DesktopBackupEntry(
         backup, before.length, DateTime.utc(2026, 11, 18))];
   }
@@ -114,6 +116,30 @@ void main() {
     expect(recovery.restored, isTrue);
     expect(recovery.calls, 1);
     expect(find.text('Восстановить сохранение'), findsNothing);
+  });
+
+  testWidgets('failed refresh clears old backup list and preview',
+      (tester) async {
+    final recovery = await openDialog(tester);
+    await tester.tap(find.textContaining(
+        'ehtid-test-world.sav.ehtid-backup-').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Содержимое различается'), findsOneWidget);
+
+    recovery.failListing = true;
+    await tester.tap(find.byTooltip('Обновить список бэкапов'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('test listing failure'), findsOneWidget);
+    expect(find.text('Не удалось обновить список бэкапов'),
+        findsOneWidget);
+    expect(find.textContaining('ehtid-test-world.sav.ehtid-backup-'),
+        findsNothing);
+    expect(find.text('Содержимое различается'), findsNothing);
+    final action = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Восстановить'));
+    expect(action.onPressed, isNull);
+    expect(recovery.restored, isFalse);
   });
 
   testWidgets('unresolved crash rollback disables restoring backups',
