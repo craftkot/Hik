@@ -112,6 +112,69 @@ void main() {
     expect(await save.readAsBytes(), bytes('hp=200'));
   });
 
+  test('directory symlink aliases share the same writer lock', () async {
+    final aliasDir = Link('${scratch.path}${Platform.pathSeparator}alias');
+    await aliasDir.create(scratch.path);
+    final alias = File('${aliasDir.path}${Platform.pathSeparator}world.sav');
+    final original = await save.readAsBytes();
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final first = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+      if (phase == DesktopSaveCheckpoint.backupVerified) {
+        entered.complete();
+        await release.future;
+      }
+    }).write(save, bytes('hp=200'), expected: original);
+    await entered.future;
+    try {
+      await expectLater(
+          SafeDesktopSaveWriter().write(alias, bytes('hp=300'),
+              expected: original),
+          throwsStateError);
+      expect(await save.readAsBytes(), original);
+    } finally {
+      release.complete();
+    }
+    await first;
+    expect(await save.readAsBytes(), bytes('hp=200'));
+  }, skip: Platform.isWindows
+      ? 'Creating directory links may require Windows developer privileges'
+      : false);
+
+  test('Windows junction aliases share the same writer lock', () async {
+    final aliasPath = '${scratch.path}${Platform.pathSeparator}junction';
+    final created = await Process.run(
+        'cmd', ['/c', 'mklink', '/J', aliasPath, scratch.path]);
+    expect(created.exitCode, 0,
+        reason: 'Windows junction creation failed: ${created.stderr}');
+    try {
+      final alias = File('$aliasPath${Platform.pathSeparator}world.sav');
+      final original = await save.readAsBytes();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final first = SafeDesktopSaveWriter(onCheckpoint: (phase) async {
+        if (phase == DesktopSaveCheckpoint.backupVerified) {
+          entered.complete();
+          await release.future;
+        }
+      }).write(save, bytes('hp=200'), expected: original);
+      await entered.future;
+      try {
+        await expectLater(
+            SafeDesktopSaveWriter().write(alias, bytes('hp=300'),
+                expected: original),
+            throwsStateError);
+        expect(await save.readAsBytes(), original);
+      } finally {
+        release.complete();
+      }
+      await first;
+      expect(await save.readAsBytes(), bytes('hp=200'));
+    } finally {
+      await Directory(aliasPath).delete();
+    }
+  }, skip: !Platform.isWindows);
+
   test('another writer cannot write while backup restore is running',
       () async {
     final original = await save.readAsBytes();
