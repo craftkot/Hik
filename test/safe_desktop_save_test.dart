@@ -438,6 +438,31 @@ void main() {
     expect(await entries('.ehtid-backup-'), isEmpty);
   });
 
+  test('maximum-size save is copied and verified without truncation', () async {
+    final original = Uint8List(SafeDesktopSaveWriter.maxLength);
+    original[0] = 11;
+    original[original.length - 1] = 97;
+    await save.writeAsBytes(original, flush: true);
+    final edited = Uint8List.fromList(original);
+    edited[edited.length ~/ 2] = 42;
+
+    final backupPath = await SafeDesktopSaveWriter()
+        .write(save, edited, expected: original);
+    expect(await save.readAsBytes(), edited);
+    expect(await File(backupPath).readAsBytes(), original);
+  });
+
+  test('oversized on-disk save is rejected without creating a backup', () async {
+    final oversized = Uint8List(SafeDesktopSaveWriter.maxLength + 1);
+    await save.writeAsBytes(oversized, flush: true);
+    await expectLater(
+      SafeDesktopSaveWriter().write(save, bytes('hp=10')),
+      throwsStateError,
+    );
+    expect(await save.length(), oversized.length);
+    expect(await entries('.ehtid-backup-'), isEmpty);
+  });
+
   test('oversized replacements rejected before changing original', () async {
     await expectLater(
       SafeDesktopSaveWriter().write(
