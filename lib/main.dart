@@ -15,10 +15,13 @@ import 'core/game_value_search.dart';
 import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/ini_save_editor.dart';
+import 'core/important_save_fields.dart';
+import 'core/lossless_json_number_editor.dart';
 import 'core/storage_service.dart';
 import 'core/save_value_priority.dart';
 import 'core/translation_service.dart';
 import 'core/windows_save_discovery.dart';
+import 'core/windows_game_catalog.dart';
 import 'widgets/binary_save_dialog.dart';
 import 'widgets/game_wide_search_dialog.dart';
 import 'widgets/onscreen_number_picker.dart';
@@ -31,6 +34,9 @@ import 'widgets/android_container_lab.dart';
 import 'widgets/desktop_backup_restore_dialog.dart';
 import 'widgets/save_field_browser.dart';
 import 'widgets/ini_save_field_browser.dart';
+import 'widgets/important_save_panel.dart';
+import 'widgets/windows_game_picker.dart';
+import 'widgets/windows_game_hub.dart';
 
 void main() => runApp(const GameLabApp());
 
@@ -109,6 +115,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   final TextEditingController _apiKey = TextEditingController();
 
   Workspace _section = Workspace.preloads;
+  bool _showGameHub = Platform.isWindows;
+  DesktopGameEntry? _desktopGame;
   String? _folder;
   InstalledGameApp? _selectedApp;
   String? _overlayNumber;
@@ -123,6 +131,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   // The original on-disk bytes stay in _bytes for expected-byte backup writes.
   Uint8List? _gzipPayload;
   String? _gzipError;
+  List<ImportantSaveField> _importantEntries = const [];
+  bool _showRawSave = false;
   ArchiveInspector? _archive;
   ArchiveEntry? _archiveEntry;
   Uint8List? _archiveEntryBytes;
@@ -261,6 +271,51 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _chooseDesktopGame() async {
+    if (!Platform.isWindows || _loading) return;
+    if (_dirty) {
+      _message('Сначала сохрани или отмени правки перед сменой игры');
+      return;
+    }
+    try {
+      final games = await WindowsGameCatalog.discover();
+      if (!mounted) return;
+      if (games.isEmpty) {
+        _message('В стандартных каталогах Steam игр не найдено. '
+            'Можно выбрать папку игры вручную.');
+        return;
+      }
+      final chosen = await showWindowsGamePicker(context, games);
+      if (!mounted || chosen == null) return;
+      setState(() {
+        _folder = chosen.folder;
+        _desktopGame = chosen;
+        _showGameHub = true;
+        _selectedApp = null;
+        _extraFolders.clear();
+        _windowsFoundSaveRoots.clear();
+        _windowsFoundSaveFileIds.clear();
+        _query.clear();
+        _selected = null; _bytes = null; _gzipPayload = null;
+        _gzipError = null; _originalText = null;
+        _mobilePreview = false; _files = []; _profile = null;
+        _archive = null; _archiveEntry = null; _archiveEntryBytes = null;
+      });
+      await _scan();
+    } catch (error) {
+      _message('Не удалось выбрать установленную игру: $error');
+    }
+  }
+
+  void _openGameSection(Workspace section) {
+    if (_dirty) {
+      _message('Сначала примени или отмени изменения в файле');
+      return;
+    }
+    _changeSection(section);
+    if (_showGameHub) setState(() => _showGameHub = false);
+  }
+
   Future<void> _chooseFolder() async {
     try {
       final folder = await _storage.chooseFolder();
@@ -271,6 +326,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _folder = folder; _selectedApp = null; _extraFolders.clear();
+        _desktopGame = null; // Preserve current view when opening a folder.
         _windowsFoundSaveRoots.clear();
         _windowsFoundSaveFileIds.clear();
         _query.clear();
@@ -709,6 +765,12 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _archiveEntryBytes = null;
         _originalText = decoded;
         _editor.text = decoded ?? '';
+        _importantEntries = decoded != null
+            ? ImportantSaveInspector.inspectText(decoded)
+            : gzipError == null && !isLarge && inspector == null && !file.isImage
+                ? ImportantSaveInspector.inspectBinary(unpacked ?? bytes)
+                : const [];
+        _showRawSave = false;
         _dirty = false;
         _mobilePreview = true;
         _state = 'Открыт ${file.relativePath}';
@@ -768,7 +830,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() { _bytes = bytes; _gzipPayload =
           GzipSaveCodec.isGzip(bytes) ? payload : null;
-        _originalText = _editor.text; _dirty = false; });
+        _originalText = _editor.text; _dirty = false;
+        _importantEntries = ImportantSaveInspector.inspectText(_editor.text);
+      });
       _message('Применено! Резервная копия: $backup');
     } catch (error) { _message('Запись отменена / ошибка: $error'); }
     finally { if (mounted) setState(() => _loading = false); }
@@ -815,6 +879,178 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     if (mounted) {
       _message('Сейв восстановлен и перечитан. '
           'Копия прежней версии: $backupOfCurrent');
+    }
+  }
+
+  Future<bool> _editImportantJsonNumber(JsonField field) async {
+    final expected = field.value;
+    if (expected is! num || !expected.isFinite) return false;
+    var typed = field.preview;
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить поле'),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SelectableText(field.pointer,
+              style: const TextStyle(fontSize: 12, color: _muted)),
+            const SizedBox(height: 14),
+            TextFormField(
+              initialValue: field.preview,
+              autofocus: true,
+              onChanged: (value) => typed = value,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              decoration: const InputDecoration(labelText: 'Число JSON'),
+            ),
+            const SizedBox(height: 8),
+            const Text('Меняется только выбранное число. Пробелы, '
+                'порядок и все остальные поля остаются как были.',
+              style: TextStyle(fontSize: 11, color: _muted)),
+          ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, typed),
+            child: const Text('Изменить')),
+        ],
+      ),
+    );
+    if (updated == null || !mounted) return false;
+    try {
+      final newText = LosslessJsonNumberEditor.change(_editor.text,
+          pointer: field.pointer, expected: expected,
+          replacement: updated);
+      if (newText == _editor.text || !mounted) return false;
+      setState(() {
+        _editor.text = newText;
+        _importantEntries = ImportantSaveInspector.inspectText(newText);
+      });
+      return true;
+    } catch (error) {
+      _message('Поле не изменено: $error');
+      return false;
+    }
+  }
+
+  Future<bool> _editImportantSaveField(ImportantSaveField entry) async {
+    if (_loading) return false;
+    if (entry.json != null) return _editImportantJsonNumber(entry.json!);
+    if (entry.ini != null) return _editIniNumber(entry.ini!);
+    final field = entry.embedded;
+    final file = _selected;
+    final original = _bytes;
+    if (field == null || file == null || original == null || _dirty) {
+      return false;
+    }
+    var typed = field.value;
+    final replacement = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить поле бинарного сейва'),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(field.key, style: const TextStyle(
+                fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Текущее значение: ' + field.value),
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: field.value,
+              autofocus: true,
+              onChanged: (next) => typed = next,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              decoration: const InputDecoration(labelText: 'Новое число'),
+            ),
+            const SizedBox(height: 8),
+            const Text('Бинарный формат: можно заменить только число '
+                'той же длины, не сдвигая остальные байты.',
+              style: TextStyle(fontSize: 12)),
+          ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, typed),
+              child: const Text('Проверить правку')),
+        ],
+      ),
+    );
+    if (replacement == null || !mounted) return false;
+
+    Uint8List patchedPayload;
+    Uint8List patched;
+    try {
+      if (_selected?.id != file.id || !identical(_bytes, original)) {
+        throw StateError('Файл изменился после открытия');
+      }
+      if (GzipSaveCodec.isGzip(original) && _gzipPayload == null) {
+        throw StateError('GZIP повреждён. Запись запрещена');
+      }
+      patchedPayload = ImportantSaveInspector.patchEmbedded(
+          _gzipPayload ?? original, field, replacement);
+      patched = _gzipPayload == null
+          ? patchedPayload : GzipSaveCodec.encode(patchedPayload);
+      if (_bytesEqual(original, patched)) {
+        _message('Значение не изменилось');
+        return false;
+      }
+    } catch (error) {
+      _message('Изменение отменено: $error');
+      return false;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Подтвердить изменение сейва'),
+        content: Text(
+          'Файл: ' + file.relativePath + '\n' +
+          'Поле: ' + field.key + '\n' +
+          field.value + ' → ' + replacement.trim() + '\n\n' +
+          'Сначала создадим резервную копию. '
+          'Неизвестная внутренняя контрольная сумма игры '
+          'может помешать загрузке. Закрой игру перед записью.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Создать копию и применить')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return false;
+
+    setState(() => _loading = true);
+    try {
+      if (_selected?.id != file.id || !identical(_bytes, original)) {
+        throw StateError('Открытый файл сменился');
+      }
+      final disk = await _storage.read(file);
+      if (!_bytesEqual(disk, original)) {
+        throw StateError('Исходный сейв изменился. Открой его заново.');
+      }
+      final backup = await _storage.writeWithBackup(
+          file, patched, expected: original);
+      final verify = await _storage.read(file);
+      if (!_bytesEqual(verify, patched)) {
+        throw StateError('Проверка записи не прошла. Бэкап: $backup');
+      }
+      if (!mounted) return false;
+      setState(() {
+        _bytes = patched;
+        _gzipPayload = GzipSaveCodec.isGzip(patched)
+            ? patchedPayload : null;
+        _importantEntries = ImportantSaveInspector.inspectBinary(patchedPayload);
+        _state = 'Изменено поле ' + field.key;
+      });
+      _message('Изменение проверено. Бэкап: $backup');
+      return true;
+    } catch (error) {
+      _message('Запись отменена: $error');
+      return false;
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -895,6 +1131,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       }
       if (!mounted) return;
       setState(() { _bytes = patched; _gzipPayload = updatedGzipPayload;
+        _importantEntries = ImportantSaveInspector.inspectBinary(
+            updatedGzipPayload ?? patched);
         _state = 'Бинарный сейв обновлён'; });
       _message('Записано и проверено. Бэкап: $backup');
     } catch (error) {
@@ -987,7 +1225,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     try {
       final next = IniSaveEditor.changeNumber(_editor.text, field, updated);
       if (!mounted) return false;
-      setState(() => _editor.text = next);
+      setState(() {
+        _editor.text = next;
+        _importantEntries = ImportantSaveInspector.inspectText(next);
+      });
       return true;
     } catch (error) {
       _message('Поле INI не изменено: $error');
@@ -1061,7 +1302,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       try {
         final next = changeJsonField(_editor.text, field.pointer, updated);
         if (!mounted) return false;
-        setState(() => _editor.text = next);
+        setState(() {
+          _editor.text = next;
+          _importantEntries = ImportantSaveInspector.inspectText(next);
+        });
         return true;
       } catch (error) {
         _message('Поле не изменено: $error');
@@ -1145,9 +1389,31 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 storage: _storage),
             Expanded(child: Padding(
               padding: EdgeInsets.all(compact ? 10 : 20),
-              child: _section == Workspace.cheats
-                  ? _cheatsView()
-                  : _workspaceView(compact),
+              child: Platform.isWindows && _showGameHub
+                  ? WindowsGameHub(
+                      folder: _folder,
+                      gameName: _desktopGame?.name ??
+                        (_folder == null ? null :
+                          WindowsSaveDiscovery.suggestedGameNameFromPath(_folder!)),
+                      engine: _profile?.engine,
+                      fileCount: _files.length,
+                      busy: _loading,
+                      onChooseInstalled: _chooseDesktopGame,
+                      onChooseFolder: _chooseFolder,
+                      onSaves: () => _openGameSection(Workspace.saves),
+                      onCheats: () => _openGameSection(Workspace.cheats),
+                      onTranslation: () => _openGameSection(Workspace.localize),
+                      onResources: () => _openGameSection(Workspace.preloads),
+                      onFindSaves: () async {
+                        await _findWindowsSaveFolders();
+                        if (mounted && _folder != null) {
+                          _openGameSection(Workspace.saves);
+                        }
+                      },
+                    )
+                  : _section == Workspace.cheats
+                    ? _cheatsView()
+                    : _workspaceView(compact),
             )),
             _statusBar(),
           ])),
@@ -1185,6 +1451,25 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         ])),
       const Divider(height: 1, color: Color(0xFF2D293C)),
       const SizedBox(height: 20),
+      if (Platform.isWindows)
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          child: Tooltip(
+            message: 'Меню игры',
+            child: Material(color: Colors.transparent,
+              child: ListTile(
+              dense: true,
+              selected: _showGameHub,
+              leading: const Icon(Icons.grid_view_rounded, color: _accent),
+              title: compact ? null : const Text('Моя игра'),
+              onTap: () {
+                if (_dirty) {
+                  _message('Сначала примени или отмени изменения в файле');
+                  return;
+                }
+                setState(() => _showGameHub = true);
+              },
+            )),
+          )),
       for (final section in Workspace.values)
         if (Platform.isAndroid || section != Workspace.container)
           Padding(padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1192,7 +1477,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             child: Material(color: _section == section ? _panelLight : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
               child: InkWell(borderRadius: BorderRadius.circular(12),
-                onTap: () => _changeSection(section),
+                onTap: () => _openGameSection(section),
                 child: Padding(padding: EdgeInsets.symmetric(
                     horizontal: compact ? 17 : 12, vertical: 14),
                   child: Row(children: [
@@ -1229,15 +1514,15 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     child: Row(children: [
       if (!compact) Expanded(child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [Text(_section.title, maxLines: 1,
+        children: [Text(_showGameHub ? 'Моя игра' : _section.title, maxLines: 1,
           overflow: TextOverflow.ellipsis, style: const TextStyle(
           fontSize: 23, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
-          Text(_section.detail, maxLines: 2,
+          Text(_showGameHub ? 'Выбор игры и инструменты' : _section.detail, maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 12, color: _muted))],
       )),
-      if (compact) Expanded(child: Text(_section.title, maxLines: 2,
+      if (compact) Expanded(child: Text(_showGameHub ? 'Моя игра' : _section.title, maxLines: 2,
         style: const TextStyle(fontWeight: FontWeight.w700))),
       if (_profile != null && !compact) Padding(
         padding: const EdgeInsets.only(right: 10),
@@ -1247,9 +1532,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       if (_folder != null && !compact) Padding(
         padding: const EdgeInsets.only(right: 12),
         child: SizedBox(width: 180, child: Tooltip(message: _folder!,
-          child: Text(_selectedApp?.label ?? _folder!, overflow: TextOverflow.ellipsis,
+          child: Text(_selectedApp?.label ?? _desktopGame?.name ?? _folder!, overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _muted, fontSize: 12))))),
-      if (Platform.isWindows &&
+      if (Platform.isWindows && !_showGameHub &&
           (_section == Workspace.saves || _section == Workspace.localize))
         if (compact || _folder != null)
           IconButton(
@@ -1269,7 +1554,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             tooltip: 'Добавить папку с сейвами',
             icon: const Icon(Icons.create_new_folder_outlined)),
       ],
-      if (_section != Workspace.container)
+      if (_section != Workspace.container && !_showGameHub)
         IconButton(onPressed: _loading || _folder == null ? null : _scan,
           tooltip: 'Повторное сканирование', icon: const Icon(Icons.refresh)),
       if (Platform.isAndroid && _section != Workspace.container) ...[
@@ -1285,6 +1570,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
           icon: const Icon(Icons.sports_esports_outlined),
         ),
       ],
+      if (Platform.isWindows && !_showGameHub)
+        IconButton(
+          onPressed: _loading ? null : _chooseDesktopGame,
+          tooltip: 'Выбрать установленную игру',
+          icon: const Icon(Icons.sports_esports_outlined)),
       if (_section != Workspace.container) const SizedBox(width: 6),
       if (_section != Workspace.container)
         FilledButton.icon(
@@ -1422,6 +1712,9 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         (file.extension == '.ini' || file.extension == '.cfg') &&
         (file.isSave || file.isStructuredIniSaveCandidate ||
             _windowsFoundSaveFileIds.contains(file.id));
+    final showImportantSave = _section == Workspace.saves &&
+        !_showRawSave && _archive == null && _gzipError == null &&
+        !file.isImage && file.size <= maxEditableBytes;
     final canUseJsonEditor = canEdit &&
         (_section == Workspace.saves || _section == Workspace.localize) &&
         (file.isJson || _editor.text.trimLeft().startsWith('{') ||
@@ -1460,6 +1753,18 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
               tooltip: 'Поиск чисел в бинарном сейве',
               onPressed: _loading ? null : _showBinarySaveEditor,
               icon: const Icon(Icons.manage_search, color: _accent)),
+            if (_section == Workspace.saves && _showRawSave &&
+                _archive == null && _gzipError == null &&
+                file.size <= maxEditableBytes)
+              IconButton(
+                tooltip: 'Вернуться к списку важных параметров',
+                onPressed: () => setState(() {
+                  _importantEntries = _originalText != null
+                      ? ImportantSaveInspector.inspectText(_editor.text)
+                      : ImportantSaveInspector.inspectBinary(_gzipPayload ?? bytes);
+                  _showRawSave = false;
+                }),
+                icon: const Icon(Icons.list_alt_rounded, color: _accent)),
             if (_dirty) IconButton(
               tooltip: 'Отменить несохранённые правки',
               onPressed: () => _editor.text = _originalText ?? '',
@@ -1475,7 +1780,15 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         if (_section == Workspace.localize && canEdit)
           _translationToolbar(file),
         const Divider(height: 1, color: Color(0xFF302B42)),
-        Expanded(child: _archive != null
+        Expanded(child: showImportantSave
+            ? ImportantSavePanel(
+                entries: _importantEntries,
+                isBinary: !canEdit,
+                onEdit: _editImportantSaveField,
+                onShowRaw: () => setState(() => _showRawSave = true),
+                onSearchBinary: canBinaryEdit ? _showBinarySaveEditor : null,
+              )
+            : _archive != null
             ? _archiveBrowser(narrow: narrow)
             : imagePreview
             ? Center(child: InteractiveViewer(
