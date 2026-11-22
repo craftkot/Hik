@@ -153,6 +153,23 @@ void main() {
     expect(await save.readAsBytes(), bytes('hp=120;coins=500'));
   });
 
+  test('preview reads exact 8 MiB backup and rejects 8 MiB plus one byte',
+      () async {
+    final backup = File('${save.path}.ehtid-backup-boundary.bak');
+    final exact = Uint8List(SafeDesktopSaveWriter.maxLength);
+    exact[exact.length - 1] = 123;
+    await backup.writeAsBytes(exact, flush: true);
+    final preview = await recovery.preview(save, backup);
+    expect(preview.backupBytes.length, SafeDesktopSaveWriter.maxLength);
+    expect(preview.backupBytes.last, 123);
+    expect(await save.readAsBytes(), bytes('hp=120;coins=500'));
+
+    await backup.writeAsBytes(
+        Uint8List(SafeDesktopSaveWriter.maxLength + 1), flush: true);
+    await expectLater(recovery.preview(save, backup), throwsStateError);
+    expect(await save.readAsBytes(), bytes('hp=120;coins=500'));
+  });
+
   test('more than 64 matching backups are rejected without touching save',
       () async {
     final original = await save.readAsBytes();

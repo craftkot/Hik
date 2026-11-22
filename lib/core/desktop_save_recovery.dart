@@ -115,11 +115,17 @@ class DesktopSaveRecovery {
   static Future<Uint8List> _readLimited(File file) async {
     final reader = await file.open();
     try {
-      final bytes = await reader.read(SafeDesktopSaveWriter.maxLength + 1);
-      if (bytes.length > SafeDesktopSaveWriter.maxLength) {
-        throw StateError('Файл превышает лимит 8 МиБ: ${file.path}');
+      final buffer = BytesBuilder(copy: false);
+      while (true) {
+        final remaining = SafeDesktopSaveWriter.maxLength + 1 - buffer.length;
+        final chunk = await reader.read(remaining < 64 * 1024 ? remaining : 64 * 1024);
+        if (chunk.isEmpty) break;
+        buffer.add(chunk);
+        if (buffer.length > SafeDesktopSaveWriter.maxLength) {
+          throw StateError('Файл превышает лимит 8 МиБ: ${file.path}');
+        }
       }
-      return Uint8List.fromList(bytes);
+      return buffer.takeBytes();
     } finally {
       await reader.close();
     }
