@@ -52,6 +52,9 @@ class _DesktopBackupRestoreDialogState
         _error = null;
         _notice = null;
         _preview = null;
+        // Never show results from an earlier scan if this refresh fails.
+        _entries = const [];
+        _crashCount = 0;
       });
     }
     try {
@@ -213,7 +216,9 @@ class _DesktopBackupRestoreDialogState
               Expanded(
                 flex: 3,
                 child: _entries.isEmpty
-                  ? const Center(child: Text('Бэкапов для этого сейва нет'))
+                  ? Center(child: Text(_error != null
+                      ? 'Не удалось обновить список бэкапов'
+                      : 'Бэкапов для этого сейва нет'))
                   : ListView.builder(
                       itemCount: _entries.length,
                       itemBuilder: (context, index) {
