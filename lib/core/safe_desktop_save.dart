@@ -227,11 +227,19 @@ class SafeDesktopSaveWriter {
   static Future<Uint8List> _readBounded(File file) async {
     final handle = await file.open();
     try {
-      final bytes = await handle.read(maxLength + 1);
-      if (bytes.length > maxLength) {
-        throw StateError('Сейв на диске больше 8 МиБ');
+      final result = BytesBuilder(copy: false);
+      // A single RandomAccessFile.read call is allowed to return fewer bytes
+      // than requested. Keep reading to EOF, but never buffer over 8 MiB.
+      while (true) {
+        final remaining = maxLength + 1 - result.length;
+        final chunk = await handle.read(min(64 * 1024, remaining));
+        if (chunk.isEmpty) break;
+        result.add(chunk);
+        if (result.length > maxLength) {
+          throw StateError('Сейв на диске больше 8 МиБ');
+        }
       }
-      return Uint8List.fromList(bytes);
+      return result.takeBytes();
     } finally {
       await handle.close();
     }
