@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -16,12 +17,14 @@ class _FakeRecovery extends DesktopSaveRecovery {
   final Uint8List after = Uint8List.fromList([104, 112, 61, 57, 57, 57]);
   bool restored = false;
   bool failListing = false;
+  Completer<void>? pauseListing;
   int calls = 0;
 
   @override
   Future<List<DesktopBackupEntry>> listBackups(File original) async {
     expect(original.path, save.path);
     if (failListing) throw StateError('test listing failure');
+    await pauseListing?.future;
     return [DesktopBackupEntry(
         backup, before.length, DateTime.utc(2026, 11, 18))];
   }
@@ -140,6 +143,28 @@ void main() {
         find.widgetWithText(FilledButton, 'Восстановить'));
     expect(action.onPressed, isNull);
     expect(recovery.restored, isFalse);
+  });
+
+  testWidgets('refresh shows loading instead of an empty backup result',
+      (tester) async {
+    final recovery = await openDialog(tester);
+    recovery.pauseListing = Completer<void>();
+
+    await tester.tap(find.byTooltip('Обновить список бэкапов'));
+    await tester.pump();
+
+    expect(find.text('Загружаю резервные копии…'), findsOneWidget);
+    expect(find.text('Бэкапов для этого сейва нет'), findsNothing);
+    expect(find.text('Не удалось обновить список бэкапов'), findsNothing);
+    final action = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Восстановить'));
+    expect(action.onPressed, isNull);
+
+    recovery.pauseListing!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Загружаю резервные копии…'), findsNothing);
+    expect(find.textContaining('ehtid-test-world.sav.ehtid-backup-'),
+        findsWidgets);
   });
 
   testWidgets('unresolved crash rollback disables restoring backups',
