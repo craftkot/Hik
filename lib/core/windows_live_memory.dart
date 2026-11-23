@@ -36,6 +36,13 @@ class LiveGameProcess {
   final String title;
   /// UTC creation ticks; prevents writes after Windows reuses a PID.
   final int? processStartTicks;
+
+  /// A PID can be recycled. Only preserve a UI selection when both
+  /// observations have the same non-null Windows creation timestamp.
+  bool isSameInstanceAs(LiveGameProcess other) =>
+      pid == other.pid &&
+      processStartTicks != null &&
+      processStartTicks == other.processStartTicks;
 }
 
 class LiveMemoryScan {
