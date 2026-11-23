@@ -30,10 +30,12 @@ enum LiveChangeMode {
 }
 
 class LiveGameProcess {
-  const LiveGameProcess({required this.pid, required this.name, required this.title});
+  const LiveGameProcess({required this.pid, required this.name, required this.title, this.processStartTicks});
   final int pid;
   final String name;
   final String title;
+  /// UTC creation ticks; prevents writes after Windows reuses a PID.
+  final int? processStartTicks;
 }
 
 class LiveMemoryScan {
@@ -146,6 +148,7 @@ class WindowsLiveMemoryService {
         pid: (row['pid'] as num).toInt(),
         name: row['name'] as String,
         title: row['title'] as String,
+        processStartTicks: (row['processStartTicks'] as num?)?.toInt(),
       );
     }).toList(growable: false);
   }
@@ -283,7 +286,11 @@ class WindowsLiveMemoryService {
     required String address,
     required String expected,
     required String replacement,
+    int? processStartTicks,
   }) async {
+    if (processStartTicks == null || processStartTicks <= 0) {
+      throw StateError('Обнови список игр: не получено время запуска процесса');
+    }
     validateValue(expected, format);
     validateValue(replacement, format);
     if (!RegExp(r'^0x[0-9a-fA-F]{5,16}$').hasMatch(address)) {
@@ -292,6 +299,7 @@ class WindowsLiveMemoryService {
     await _request({
       'command': 'write',
       'pid': pid,
+      'processStartTicks': processStartTicks,
       'format': format.code,
       'address': address,
       'expected': expected.replaceAll(',', '.'),
