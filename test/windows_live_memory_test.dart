@@ -150,6 +150,18 @@ void main() {
     ), throwsRangeError);
   });
 
+  test('RAM writes require a fresh process identity before launching helper', () async {
+    final service = WindowsLiveMemoryService();
+    await expectLater(service.write(
+      pid: 4242, format: LiveValueFormat.int32, address: '0x12345',
+      expected: '100', replacement: '200',
+    ), throwsStateError);
+    await expectLater(service.write(
+      pid: 4242, processStartTicks: 0, format: LiveValueFormat.int32,
+      address: '0x12345', expected: '100', replacement: '200',
+    ), throwsStateError);
+  });
+
   test('non-Windows helper refuses operation instead of process access',
       () async {
     final service = WindowsLiveMemoryService();
