@@ -58,6 +58,7 @@ class _MockWindowsMemory extends WindowsLiveMemoryService {
     required String address,
     required String expected,
     required String replacement,
+    int? processStartTicks,
   }) async {
     writeCalls++;
     throw StateError('Read-only test must not write');
