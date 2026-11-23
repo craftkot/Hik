@@ -135,7 +135,14 @@ class _DesktopBackupRestoreDialogState
       // Return control to the parent only after the guarded restore succeeds.
       Navigator.pop(context, newBackup);
     } catch (error) {
-      if (mounted) setState(() => _error = 'Восстановление отменено: $error');
+      if (mounted) {
+        setState(() {
+          // The save or backup may have changed since the failed attempt.
+          // Require a fresh read-only preview before another restore.
+          _preview = null;
+          _error = 'Восстановление отменено: $error';
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
