@@ -38,6 +38,7 @@ class _DesktopBackupRestoreDialogState
   int _crashCount = 0;
   String? _error;
   String? _notice;
+  bool _crashInspectionFailed = false;
 
   @override
   void initState() {
@@ -55,10 +56,13 @@ class _DesktopBackupRestoreDialogState
         // Never show results from an earlier scan if this refresh fails.
         _entries = const [];
         _crashCount = 0;
+        _crashInspectionFailed = false;
       });
     }
+    var inspectingCrash = false;
     try {
       final entries = await _recovery.listBackups(widget.save);
+      inspectingCrash = true;
       final interrupted = await (widget.inspectCrash ??
           CrashRollbackInspector.inspect)(widget.save);
       if (!mounted) return;
@@ -67,7 +71,14 @@ class _DesktopBackupRestoreDialogState
         _crashCount = interrupted.length;
       });
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) {
+        setState(() {
+          _crashInspectionFailed = inspectingCrash;
+          _error = inspectingCrash
+              ? 'Не удалось проверить аварийный откат: $error'
+              : '$error';
+        });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -226,7 +237,9 @@ class _DesktopBackupRestoreDialogState
                 child: _entries.isEmpty
                   ? Center(child: Text(_busy
                       ? 'Загружаю резервные копии…'
-                      : _error != null
+                      : _crashInspectionFailed
+                          ? 'Проверка аварийного отката не удалась'
+                          : _error != null
                           ? 'Не удалось обновить список бэкапов'
                           : 'Бэкапов для этого сейва нет'))
                   : ListView.builder(

@@ -54,7 +54,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   Future<_FakeRecovery> openDialog(WidgetTester tester,
-      {bool interrupted = false}) async {
+      {bool interrupted = false, bool failCrashInspection = false}) async {
     // UI-only test doubles keep dart:io off the widget test's fake clock.
     // The real disk/restore implementation has separate ordinary unit tests.
     tester.view.physicalSize = const Size(1280, 960);
@@ -74,7 +74,11 @@ void main() {
               builder: (_) => DesktopBackupRestoreDialog(
                 save: save,
                 recovery: recovery,
-                inspectCrash: (_) async => interrupted
+                inspectCrash: (_) async {
+                  if (failCrashInspection) {
+                    throw StateError('test crash inspection failure');
+                  }
+                  return interrupted
                   ? [
                       CrashRollbackPreview(
                         path: '${save.path}.ehtid-rollback-test.tmp',
@@ -82,7 +86,8 @@ void main() {
                         currentExists: true,
                         currentBytes: recovery.after,
                       ),
-                    ] : [],
+                    ] : [];
+                },
               )),
           child: const Text('Открыть восстановление'),
         )),
@@ -196,6 +201,21 @@ void main() {
     expect(find.text('Загружаю резервные копии…'), findsNothing);
     expect(find.textContaining('ehtid-test-world.sav.ehtid-backup-'),
         findsWidgets);
+  });
+
+  testWidgets('failed crash inspection never presents backups as absent',
+      (tester) async {
+    final recovery = await openDialog(tester, failCrashInspection: true);
+    expect(find.textContaining('test crash inspection failure'), findsOneWidget);
+    expect(find.text('Проверка аварийного отката не удалась'),
+        findsOneWidget);
+    expect(find.text('Бэкапов для этого сейва нет'), findsNothing);
+    expect(find.textContaining('ehtid-test-world.sav.ehtid-backup-'),
+        findsNothing);
+    final action = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Восстановить'));
+    expect(action.onPressed, isNull);
+    expect(recovery.restored, isFalse);
   });
 
   testWidgets('unresolved crash rollback disables restoring backups',
