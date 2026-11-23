@@ -17,6 +17,7 @@ class _FakeRecovery extends DesktopSaveRecovery {
   final Uint8List after = Uint8List.fromList([104, 112, 61, 57, 57, 57]);
   bool restored = false;
   bool failListing = false;
+  bool failRestore = false;
   Completer<void>? pauseListing;
   int calls = 0;
 
@@ -43,6 +44,7 @@ class _FakeRecovery extends DesktopSaveRecovery {
     expect(confirmed, isTrue);
     expect(approved.backup.path, backup.path);
     calls++;
+    if (failRestore) throw StateError('test restore failure');
     restored = true;
     return '${save.path}.ehtid-backup-safety.bak';
   }
@@ -119,6 +121,35 @@ void main() {
     expect(recovery.restored, isTrue);
     expect(recovery.calls, 1);
     expect(find.text('Восстановить сохранение'), findsNothing);
+  });
+
+  testWidgets('failed restore invalidates preview before retry',
+      (tester) async {
+    final recovery = await openDialog(tester);
+    recovery.failRestore = true;
+    await tester.tap(find.textContaining(
+        'ehtid-test-world.sav.ehtid-backup-').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Содержимое различается'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Восстановить'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Подтвердить восстановление'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('test restore failure'), findsOneWidget);
+    expect(find.text('Содержимое различается'), findsNothing);
+    final action = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Восстановить'));
+    expect(action.onPressed, isNull);
+    expect(recovery.calls, 1);
+    expect(recovery.restored, isFalse);
+
+    recovery.failRestore = false;
+    await tester.tap(find.textContaining(
+        'ehtid-test-world.sav.ehtid-backup-').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Содержимое различается'), findsOneWidget);
   });
 
   testWidgets('failed refresh clears old backup list and preview',
