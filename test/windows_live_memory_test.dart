@@ -74,6 +74,31 @@ void main() {
     }), throwsFormatException);
   });
 
+  test('helper scan metadata must be nonnegative integral and typed', () {
+    for (final key in ['scannedBytes', 'regions', 'invalidated']) {
+      for (final bad in [-1, 1.5, '2', true]) {
+        expect(
+          () => LiveMemoryScan.fromJson({'addresses': [], key: bad}),
+          throwsFormatException,
+          reason: '$key must reject $bad',
+        );
+      }
+    }
+    for (final bad in [1, 'true', 0]) {
+      expect(
+        () => LiveMemoryScan.fromJson({
+          'addresses': [], 'truncated': bad,
+        }),
+        throwsFormatException,
+      );
+    }
+    final legacy = LiveMemoryScan.fromJson({'addresses': []});
+    expect(legacy.scannedBytes, 0);
+    expect(legacy.regions, 0);
+    expect(legacy.invalidated, 0);
+    expect(legacy.truncated, false);
+  });
+
   test('relative refinement modes and value snapshots are validated', () {
     expect(LiveChangeMode.values.map((mode) => mode.code), [
       'all', 'changed', 'unchanged', 'increased', 'decreased',
