@@ -193,7 +193,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       if (!mounted) return;
       setState(() {
         _processes = found;
-        _selected = found.where((p) => p.pid == _selected?.pid).firstOrNull;
+        _selected = found.where((p) => _selected != null &&
+            p.isSameInstanceAs(_selected!)).firstOrNull;
         _result = null; _lastPatch = null;
         _snapshots = const {};
         _clearWatch();
