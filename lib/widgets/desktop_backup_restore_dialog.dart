@@ -216,9 +216,11 @@ class _DesktopBackupRestoreDialogState
               Expanded(
                 flex: 3,
                 child: _entries.isEmpty
-                  ? Center(child: Text(_error != null
-                      ? 'Не удалось обновить список бэкапов'
-                      : 'Бэкапов для этого сейва нет'))
+                  ? Center(child: Text(_busy
+                      ? 'Загружаю резервные копии…'
+                      : _error != null
+                          ? 'Не удалось обновить список бэкапов'
+                          : 'Бэкапов для этого сейва нет'))
                   : ListView.builder(
                       itemCount: _entries.length,
                       itemBuilder: (context, index) {
