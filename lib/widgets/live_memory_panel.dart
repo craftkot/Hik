@@ -380,11 +380,12 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     if (expected == newValue) { _notice('Число не изменилось'); return; }
     setState(() { _busy = true; _status = 'Проверяю адрес, записываю и перечитываю…'; });
     try {
-      await _service.write(pid: game.pid, format: _format,
+      await _service.write(pid: game.pid, processStartTicks: game.processStartTicks,
+          format: _format,
           address: address, expected: expected, replacement: newValue);
       if (!mounted) return;
       setState(() {
-        _lastPatch = _LastPatch(game.pid, address, _format, expected, newValue);
+        _lastPatch = _LastPatch(game.pid, game.processStartTicks, address, _format, expected, newValue);
         _result = LiveMemoryScan(addresses: [address],
             scannedBytes: 0, truncated: false, regions: 0);
         _value.text = newValue;
@@ -402,7 +403,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     if (item == null || _busy) return;
     setState(() { _busy = true; _status = 'Проверяю и возвращаю старое число…'; });
     try {
-      await _service.write(pid: item.pid, format: item.format,
+      await _service.write(pid: item.pid, processStartTicks: item.processStartTicks,
+          format: item.format,
           address: item.address, expected: item.newValue,
           replacement: item.oldValue);
       if (!mounted) return;
@@ -686,9 +688,10 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
 }
 
 class _LastPatch {
-  const _LastPatch(this.pid, this.address, this.format, this.oldValue,
+  const _LastPatch(this.pid, this.processStartTicks, this.address, this.format, this.oldValue,
       this.newValue);
   final int pid;
+  final int? processStartTicks;
   final String address;
   final LiveValueFormat format;
   final String oldValue;
