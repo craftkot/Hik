@@ -87,7 +87,8 @@ internal static class Program
                     var name = process.ProcessName;
                     if (ignored.Contains(name) || string.IsNullOrWhiteSpace(process.MainWindowTitle))
                         continue;
-                    visible.Add(new { pid = process.Id, name, title = process.MainWindowTitle });
+                    visible.Add(new { pid = process.Id, name, title = process.MainWindowTitle,
+                        processStartTicks = process.StartTime.ToUniversalTime().Ticks });
                 }
                 catch (Exception) { /* Hidden, inaccessible or exiting process. */ }
             }
