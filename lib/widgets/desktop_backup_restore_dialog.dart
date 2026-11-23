@@ -140,6 +140,7 @@ class _DesktopBackupRestoreDialogState
           // The save or backup may have changed since the failed attempt.
           // Require a fresh read-only preview before another restore.
           _preview = null;
+          _notice = null;
           _error = 'Восстановление отменено: $error';
         });
       }
