@@ -78,13 +78,28 @@ class LiveMemoryScan {
              .hasMatch(item)))) {
       throw const FormatException('Некорректный список числовых снимков');
     }
+    // A helper response is untrusted input. Do not silently truncate
+    // fractional counters or accept negative/boolean-like metadata.
+    int nonNegativeCount(String key) {
+      final value = json[key];
+      if (value == null) return 0; // Older helpers omitted these counters.
+      if (value is! int || value < 0) {
+        throw FormatException('Некорректное поле $key в результате');
+      }
+      return value;
+    }
+
+    final truncated = json['truncated'];
+    if (truncated != null && truncated is! bool) {
+      throw const FormatException('Некорректный признак усечения результата');
+    }
     return LiveMemoryScan(
       addresses: List<String>.unmodifiable(addresses.cast<String>()),
       values: List<String>.unmodifiable(values.cast<String>()),
-      invalidated: (json['invalidated'] as num?)?.toInt() ?? 0,
-      scannedBytes: (json['scannedBytes'] as num?)?.toInt() ?? 0,
-      truncated: json['truncated'] == true,
-      regions: (json['regions'] as num?)?.toInt() ?? 0,
+      invalidated: nonNegativeCount('invalidated'),
+      scannedBytes: nonNegativeCount('scannedBytes'),
+      truncated: truncated == true,
+      regions: nonNegativeCount('regions'),
     );
   }
 }
