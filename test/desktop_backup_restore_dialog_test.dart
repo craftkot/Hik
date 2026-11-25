@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:game_lab/core/crash_rollback_inspector.dart';
 import 'package:game_lab/core/desktop_save_recovery.dart';
@@ -19,6 +20,7 @@ class _FakeRecovery extends DesktopSaveRecovery {
   bool failListing = false;
   bool failRestore = false;
   Completer<void>? pauseListing;
+  Completer<void>? pauseRestore;
   int calls = 0;
 
   @override
@@ -45,6 +47,7 @@ class _FakeRecovery extends DesktopSaveRecovery {
     expect(approved.backup.path, backup.path);
     calls++;
     if (failRestore) throw StateError('test restore failure');
+    await pauseRestore?.future;
     restored = true;
     return '${save.path}.ehtid-backup-safety.bak';
   }
@@ -230,4 +233,29 @@ void main() {
     expect(action.onPressed, isNull);
     expect(recovery.restored, isFalse);
   });
+
+  testWidgets('busy restore rejects Escape and barrier dismissal',
+      (tester) async {
+    final recovery = await openDialog(tester);
+    recovery.pauseRestore = Completer<void>();
+    await tester.tap(find.textContaining(
+        'ehtid-test-world.sav.ehtid-backup-').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Восстановить'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Подтвердить восстановление'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(recovery.calls, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Восстановить сохранение'), findsOneWidget);
+    expect(recovery.restored, isFalse);
+    recovery.pauseRestore!.complete();
+    await tester.pumpAndSettle();
+    expect(recovery.restored, isTrue);
+    expect(find.text('Восстановить сохранение'), findsNothing);
+  });
+
 }

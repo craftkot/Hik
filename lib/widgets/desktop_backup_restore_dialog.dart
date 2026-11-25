@@ -171,147 +171,150 @@ class _DesktopBackupRestoreDialogState
   Widget build(BuildContext context) {
     final selected = _preview;
     final blocked = _crashCount > 0;
-    return Dialog(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 650, maxHeight: 610),
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(children: [
-                const Icon(Icons.restore, color: Color(0xFFB68BFF)),
-                const SizedBox(width: 10),
-                const Expanded(child: Text('Восстановить сохранение',
-                    style: TextStyle(fontSize: 19,
-                        fontWeight: FontWeight.w800))),
-                IconButton(
-                  tooltip: 'Обновить список бэкапов',
-                  onPressed: _busy ? null : _refresh,
-                  icon: const Icon(Icons.refresh),
+    return PopScope(
+      canPop: !_busy,
+      child: Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 650, maxHeight: 610),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [
+                  const Icon(Icons.restore, color: Color(0xFFB68BFF)),
+                  const SizedBox(width: 10),
+                  const Expanded(child: Text('Восстановить сохранение',
+                      style: TextStyle(fontSize: 19,
+                          fontWeight: FontWeight.w800))),
+                  IconButton(
+                    tooltip: 'Обновить список бэкапов',
+                    onPressed: _busy ? null : _refresh,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                  IconButton(
+                    tooltip: 'Закрыть',
+                    onPressed: _busy ? null : () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ]),
+                SelectableText(widget.save.path,
+                  maxLines: 2,
+                  style: const TextStyle(fontSize: 11,
+                      color: Color(0xFFA9A2C0))),
+                const SizedBox(height: 8),
+                const Text('Выбери резервную копию и проверь содержимое. '
+                    'Никаких изменений до отдельного подтверждения.',
+                  style: TextStyle(fontSize: 12)),
+                if (_busy) const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: LinearProgressIndicator()),
+                if (blocked) Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'Найдено аварийных файлов: $_crashCount. '
+                    'Автовосстановление отключено: сначала вручную '
+                    'разбери незавершённый откат. Исходники не удаляются.',
+                    style: const TextStyle(color: Colors.orangeAccent,
+                        fontSize: 12)),
                 ),
-                IconButton(
-                  tooltip: 'Закрыть',
-                  onPressed: _busy ? null : () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
+                if (_error != null) Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: SelectableText(_error!,
+                    style: const TextStyle(color: Colors.orangeAccent,
+                        fontSize: 12)),
                 ),
-              ]),
-              SelectableText(widget.save.path,
-                maxLines: 2,
-                style: const TextStyle(fontSize: 11,
-                    color: Color(0xFFA9A2C0))),
-              const SizedBox(height: 8),
-              const Text('Выбери резервную копию и проверь содержимое. '
-                  'Никаких изменений до отдельного подтверждения.',
-                style: TextStyle(fontSize: 12)),
-              if (_busy) const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: LinearProgressIndicator()),
-              if (blocked) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  'Найдено аварийных файлов: $_crashCount. '
-                  'Автовосстановление отключено: сначала вручную '
-                  'разбери незавершённый откат. Исходники не удаляются.',
-                  style: const TextStyle(color: Colors.orangeAccent,
-                      fontSize: 12)),
-              ),
-              if (_error != null) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: SelectableText(_error!,
-                  style: const TextStyle(color: Colors.orangeAccent,
-                      fontSize: 12)),
-              ),
-              if (_notice != null) Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(_notice!, style:
-                    const TextStyle(fontSize: 12))),
-              const SizedBox(height: 8),
-              const Text('РЕЗЕРВНЫЕ КОПИИ',
-                style: TextStyle(fontSize: 11,
-                  letterSpacing: 1.2,
-                  color: Color(0xFFB68BFF),
-                  fontWeight: FontWeight.bold)),
-              Expanded(
-                flex: 3,
-                child: _entries.isEmpty
-                  ? Center(child: Text(_busy
-                      ? 'Загружаю резервные копии…'
-                      : _crashInspectionFailed
-                          ? 'Проверка аварийного отката не удалась'
-                          : _error != null
-                          ? 'Не удалось обновить список бэкапов'
-                          : 'Бэкапов для этого сейва нет'))
-                  : ListView.builder(
-                      itemCount: _entries.length,
-                      itemBuilder: (context, index) {
-                        final entry = _entries[index];
-                        final chosen = selected?.backup.path == entry.file.path;
-                        return ListTile(
-                          dense: true,
-                          selected: chosen,
-                          leading: const Icon(Icons.inventory_2_outlined),
-                          title: Text(entry.file.uri.pathSegments.last,
-                              maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12)),
-                          subtitle: Text(
-                            '${_date(entry.modified)}  ·  ${entry.length} байт',
-                            style: const TextStyle(fontSize: 11)),
-                          trailing: chosen
-                              ? const Icon(Icons.check_circle_outline)
-                              : const Icon(Icons.visibility_outlined),
-                          onTap: _busy ? null : () => _select(entry),
-                        );
-                      },
-                    ),
-              ),
-              const Divider(),
-              const Text('ПРЕДПРОСМОТР',
-                style: TextStyle(fontSize: 11,
-                  letterSpacing: 1.2,
-                  color: Color(0xFF5EE9F5),
-                  fontWeight: FontWeight.bold)),
-              Expanded(
-                flex: 2,
-                child: selected == null
-                  ? const Center(child: Text('Выбери бэкап выше',
-                      style: TextStyle(fontSize: 12)))
-                  : ListView(children: [
-                      Text(
-                        'Текущий файл: ${selected.currentBytes.length} байт · '
-                        'Копия: ${selected.backupBytes.length} байт',
-                        style: const TextStyle(fontSize: 12)),
-                      const SizedBox(height: 5),
-                      Text(selected.differs
-                          ? 'Содержимое различается'
-                          : 'Содержимое совпадает: восстанавливать нечего',
-                        style: const TextStyle(
-                          fontSize: 12, color: Color(0xFF5EE9F5))),
-                      const SizedBox(height: 7),
-                      const Text('Начало резервной копии (HEX):',
-                          style: TextStyle(fontSize: 11)),
-                      SelectableText(hexPreview(selected.backupBytes,
-                          limit: 64),
-                        style: const TextStyle(
-                          fontSize: 10, fontFamily: 'monospace')),
-                    ]),
-              ),
-              const SizedBox(height: 8),
-              Row(children: [
-                const Expanded(child: Text(
-                    'Только Windows · новый бэкап создаётся перед заменой',
-                    style: TextStyle(fontSize: 10,
-                        color: Color(0xFFA9A2C0)))),
-                const SizedBox(width: 8),
-                FilledButton.icon(
-                  onPressed: _busy || blocked ||
-                          selected == null || !selected.differs
-                      ? null : _restore,
-                  icon: const Icon(Icons.restore),
-                  label: const Text('Восстановить'),
+                if (_notice != null) Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(_notice!, style:
+                      const TextStyle(fontSize: 12))),
+                const SizedBox(height: 8),
+                const Text('РЕЗЕРВНЫЕ КОПИИ',
+                  style: TextStyle(fontSize: 11,
+                    letterSpacing: 1.2,
+                    color: Color(0xFFB68BFF),
+                    fontWeight: FontWeight.bold)),
+                Expanded(
+                  flex: 3,
+                  child: _entries.isEmpty
+                    ? Center(child: Text(_busy
+                        ? 'Загружаю резервные копии…'
+                        : _crashInspectionFailed
+                            ? 'Проверка аварийного отката не удалась'
+                            : _error != null
+                            ? 'Не удалось обновить список бэкапов'
+                            : 'Бэкапов для этого сейва нет'))
+                    : ListView.builder(
+                        itemCount: _entries.length,
+                        itemBuilder: (context, index) {
+                          final entry = _entries[index];
+                          final chosen = selected?.backup.path == entry.file.path;
+                          return ListTile(
+                            dense: true,
+                            selected: chosen,
+                            leading: const Icon(Icons.inventory_2_outlined),
+                            title: Text(entry.file.uri.pathSegments.last,
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12)),
+                            subtitle: Text(
+                              '${_date(entry.modified)}  ·  ${entry.length} байт',
+                              style: const TextStyle(fontSize: 11)),
+                            trailing: chosen
+                                ? const Icon(Icons.check_circle_outline)
+                                : const Icon(Icons.visibility_outlined),
+                            onTap: _busy ? null : () => _select(entry),
+                          );
+                        },
+                      ),
                 ),
-              ]),
-            ],
+                const Divider(),
+                const Text('ПРЕДПРОСМОТР',
+                  style: TextStyle(fontSize: 11,
+                    letterSpacing: 1.2,
+                    color: Color(0xFF5EE9F5),
+                    fontWeight: FontWeight.bold)),
+                Expanded(
+                  flex: 2,
+                  child: selected == null
+                    ? const Center(child: Text('Выбери бэкап выше',
+                        style: TextStyle(fontSize: 12)))
+                    : ListView(children: [
+                        Text(
+                          'Текущий файл: ${selected.currentBytes.length} байт · '
+                          'Копия: ${selected.backupBytes.length} байт',
+                          style: const TextStyle(fontSize: 12)),
+                        const SizedBox(height: 5),
+                        Text(selected.differs
+                            ? 'Содержимое различается'
+                            : 'Содержимое совпадает: восстанавливать нечего',
+                          style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF5EE9F5))),
+                        const SizedBox(height: 7),
+                        const Text('Начало резервной копии (HEX):',
+                            style: TextStyle(fontSize: 11)),
+                        SelectableText(hexPreview(selected.backupBytes,
+                            limit: 64),
+                          style: const TextStyle(
+                            fontSize: 10, fontFamily: 'monospace')),
+                      ]),
+                ),
+                const SizedBox(height: 8),
+                Row(children: [
+                  const Expanded(child: Text(
+                      'Только Windows · новый бэкап создаётся перед заменой',
+                      style: TextStyle(fontSize: 10,
+                          color: Color(0xFFA9A2C0)))),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _busy || blocked ||
+                            selected == null || !selected.differs
+                        ? null : _restore,
+                    icon: const Icon(Icons.restore),
+                    label: const Text('Восстановить'),
+                  ),
+                ]),
+              ],
+            ),
           ),
         ),
       ),
