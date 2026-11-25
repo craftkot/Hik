@@ -45,13 +45,7 @@ class CrashRollbackInspector {
     }
     Uint8List? current;
     if (currentType == FileSystemEntityType.file) {
-      if (await save.length() > SafeDesktopSaveWriter.maxLength) {
-        throw StateError('Сейв превышает лимит 8 МиБ');
-      }
-      current = await save.readAsBytes();
-      if (current.length > SafeDesktopSaveWriter.maxLength) {
-        throw StateError('Сейв превышает лимит 8 МиБ');
-      }
+      current = await readBounded(save, SafeDesktopSaveWriter.maxLength);
     }
     final result = <CrashRollbackPreview>[];
     var retainedBytes = 0;
@@ -66,22 +60,14 @@ class CrashRollbackInspector {
         throw StateError('Слишком много аварийных файлов (максимум $maxCandidates)');
       }
       final candidate = File(entity.path);
-      if (await candidate.length() > SafeDesktopSaveWriter.maxLength) {
-        throw StateError('Аварийный файл превышает лимит 8 МиБ: ${entity.path}');
-      }
-      final candidateLength = await candidate.length();
-      final requiredBytes = candidateLength + (current?.length ?? 0);
-      if (requiredBytes > maxPreviewBytes - retainedBytes) {
+      final remaining = maxPreviewBytes - retainedBytes - (current?.length ?? 0);
+      if (remaining < 0) {
         throw StateError('Аварийные файлы превышают общий лимит предпросмотра 32 МиБ');
       }
-      final data = await candidate.readAsBytes();
-      if (data.length > SafeDesktopSaveWriter.maxLength) {
-        throw StateError('Аварийный файл превышает лимит 8 МиБ: ${entity.path}');
-      }
-      if (data.length + (current?.length ?? 0) >
-          maxPreviewBytes - retainedBytes) {
-        throw StateError('Аварийные файлы превышают общий лимит предпросмотра 32 МиБ');
-      }
+      final limit = remaining < SafeDesktopSaveWriter.maxLength
+          ? remaining
+          : SafeDesktopSaveWriter.maxLength;
+      final data = await readBounded(candidate, limit);
       retainedBytes += data.length + (current?.length ?? 0);
       result.add(CrashRollbackPreview(
         path: candidate.path,
@@ -92,5 +78,25 @@ class CrashRollbackInspector {
     }
     result.sort((a, b) => a.path.compareTo(b.path));
     return result;
+  }
+  /// Read at most [limit] + one sentinel byte, even if a file grows.
+  /// The file handle is closed even when the limit is exceeded.
+  static Future<Uint8List> readBounded(File file, int limit) async {
+    final reader = await file.open();
+    try {
+      final buffer = BytesBuilder(copy: false);
+      while (true) {
+        final remaining = limit + 1 - buffer.length;
+        final chunk = await reader.read(
+            remaining < 64 * 1024 ? remaining : 64 * 1024);
+        if (chunk.isEmpty) return buffer.takeBytes();
+        if (chunk.length > limit - buffer.length) {
+          throw StateError('Файл превышает лимит предпросмотра: ${file.path}');
+        }
+        buffer.add(chunk);
+      }
+    } finally {
+      await reader.close();
+    }
   }
 }

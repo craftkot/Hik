@@ -119,4 +119,23 @@ void main() {
     expect(await save.readAsBytes(), data('new'));
   });
 
+  test('bounded reader accepts exact limit and rejects one extra byte', () async {
+    expect(await CrashRollbackInspector.readBounded(save, 3), data('new'));
+    await expectLater(
+        CrashRollbackInspector.readBounded(save, 2), throwsStateError);
+    expect(await save.readAsBytes(), data('new'));
+  });
+
+  test('bounded reader handles zero budget and multiple chunks', () async {
+    await save.writeAsBytes(Uint8List(0));
+    expect(await CrashRollbackInspector.readBounded(save, 0), isEmpty);
+    final payload = Uint8List(64 * 1024 + 1)..last = 42;
+    await save.writeAsBytes(payload);
+    await expectLater(
+        CrashRollbackInspector.readBounded(save, 0), throwsStateError);
+    await expectLater(
+        CrashRollbackInspector.readBounded(save, 64 * 1024), throwsStateError);
+    expect(await CrashRollbackInspector.readBounded(save, payload.length),
+        payload);
+  });
 }
