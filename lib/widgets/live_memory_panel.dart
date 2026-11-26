@@ -26,6 +26,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
   LivePercentEncoding? _percentEncoding;
   List<LivePercentScanGroup> _percentGroups = const [];
   bool _percentSearchCancelled = false;
+  bool _percentScanning = false;
   String _displayNumber(String raw) => _percentEncoding?.display(raw) ?? raw;
   LiveMemoryScan? _result;
   _LastPatch? _lastPatch;
@@ -309,6 +310,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     setState(() {
       _busy = true;
       _percentSearchCancelled = false;
+      _percentScanning = true;
       _percentGroups = const [];
       _percentEncoding = null;
       _result = null;
@@ -329,7 +331,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
         },
       );
       if (!mounted || _percentSearchCancelled ||
-          !game.isSameInstanceAs(_selected ?? game)) return;
+          _selected == null || !game.isSameInstanceAs(_selected!)) return;
       final processes = await _service.processes();
       if (!mounted || _percentSearchCancelled) return;
       if (!processes.any(game.isSameInstanceAs)) {
@@ -340,14 +342,86 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
         _status = groups.every((g) => g.scan.addresses.isEmpty)
             ? 'Нет точных совпадений. Значение может быть вычисляемым '
               'или округлённым. Попробуй другое число/лимит RAM.'
-            : 'Выбери представление, измени процент в игре и уточни. '
-              'Найденные адреса ещё не подтверждены.';
+            : 'Измени процент в игре и уточни все варианты или выбери '
+              'один формат. Найденные адреса ещё не подтверждены.';
       });
     } catch (error) {
       if (!_percentSearchCancelled) _notice(error);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() { _busy = false; _percentScanning = false; });
     }
+  }
+
+  Future<void> _refineAllPercent() async {
+    final game = _selected;
+    final previous = _percentGroups;
+    if (_busy || game == null || previous.isEmpty) return;
+    String input;
+    try {
+      input = LivePercentEncoding.normalize(_value.text);
+    } catch (error) {
+      _notice(error);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _percentScanning = true;
+      _percentSearchCancelled = false;
+      _result = null;
+      _percentEncoding = null;
+      _snapshots = const {};
+      _lastPatch = null;
+      _clearWatch();
+      _percentGroups = const [];
+    });
+    try {
+      if (!(await _service.processes()).any(game.isSameInstanceAs)) {
+        throw StateError('Игровой процесс завершился или сменился');
+      }
+      final refined = <LivePercentScanGroup>[];
+      for (final group in previous) {
+        if (!mounted || _percentSearchCancelled) return;
+        if (group.scan.addresses.isEmpty) continue;
+        String raw;
+        try {
+          raw = group.encoding.encode(input);
+        } on FormatException {
+          continue;
+        }
+        setState(() => _status = 'Уточняю: ' + group.encoding.label);
+        final result = await _service.refine(pid: game.pid,
+            format: group.encoding.format, value: raw,
+            addresses: group.scan.addresses);
+        refined.add(LivePercentScanGroup(group.encoding, raw,
+            LiveMemoryScan(addresses: result.addresses,
+                scannedBytes: result.scannedBytes, regions: result.regions,
+                invalidated: result.invalidated,
+                truncated: group.scan.truncated || result.truncated)));
+      }
+      if (!mounted || _percentSearchCancelled) return;
+      if (!(await _service.processes()).any(game.isSameInstanceAs)) {
+        throw StateError('Игровой процесс завершился или сменился');
+      }
+      if (!mounted || _percentSearchCancelled) return;
+      setState(() {
+        _percentGroups = refined;
+        _value.text = input + '%';
+        _status = refined.every((g) => g.scan.addresses.isEmpty)
+            ? 'Кандидатов не осталось. Начни новый поиск.'
+            : 'Уточнение завершено. Выбери формат и проверь конкретный адрес.';
+      });
+    } catch (error) {
+      if (!_percentSearchCancelled) _notice(error);
+    } finally {
+      if (mounted) setState(() { _busy = false; _percentScanning = false; });
+    }
+  }
+
+  void _cancelPercentSearch() {
+    if (!_percentScanning) return;
+    _percentSearchCancelled = true;
+    _service.cancel();
+    setState(() => _status = 'Поиск процентов остановлен.');
   }
 
   void _selectPercentGroup(LivePercentScanGroup group) {
@@ -704,6 +778,13 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               const SizedBox(height: 8),
               const Text('Варианты хранения процента · лимит RAM на каждый',
                 style: TextStyle(fontSize: 11, color: _muted)),
+              OutlinedButton.icon(
+                key: const Key('refine-all-percent'),
+                onPressed: _busy || _percentGroups.every((g) => g.scan.addresses.isEmpty)
+                    ? null : _refineAllPercent,
+                icon: const Icon(Icons.filter_alt_outlined),
+                label: const Text('Уточнить все варианты'),
+              ),
               Wrap(spacing: 6, runSpacing: 4, children: [
                 for (final group in _percentGroups)
                   ChoiceChip(
@@ -716,6 +797,9 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                   ),
               ]),
             ],
+            if (_percentScanning)
+              TextButton.icon(onPressed: _percentSearchCancelled ? null : _cancelPercentSearch,
+                icon: const Icon(Icons.stop_circle_outlined), label: const Text('Остановить поиск процентов')),
             if (_busy) const Padding(padding: EdgeInsets.only(top: 10),
                 child: LinearProgressIndicator()),
             const SizedBox(height: 12),
