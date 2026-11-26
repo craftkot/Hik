@@ -71,4 +71,16 @@ void main() {
     expect(NestedSaveFields.wrappedImage(
         '{"data":{"__type":"System.String","value":"hello"}}'), isNull);
   });
+
+  test('plain parallel numeric maps and named records keep the value type', () {
+    const source = '{"stats":{"keys":["gold"],"values":[50]},'
+        '"variables":[{"name":"coins","value":"20"}]}';
+    final fields = NestedSaveFields.inspect(source);
+    expect(fields.map((f) => f.name), ['gold', 'coins']);
+    final edited = NestedSaveFields.change(source, fields.first, '55');
+    expect(edited, source.replaceFirst('50','55'));
+    final after = NestedSaveFields.inspect(edited);
+    expect(NestedSaveFields.change(edited, after.last, '999'),
+        edited.replaceFirst('"20"','"999"'));
+  });
 }
