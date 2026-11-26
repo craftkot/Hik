@@ -13,7 +13,8 @@ import '../core/windows_screen_capture.dart';
 /// search for the numeric value in accessible game files.
 /// This dialog cannot attach to or modify another process.
 class OnScreenNumberPicker extends StatefulWidget {
-  const OnScreenNumberPicker({super.key});
+  const OnScreenNumberPicker({super.key, this.allowPercent = false});
+  final bool allowPercent;
 
   @override
   State<OnScreenNumberPicker> createState() => _OnScreenNumberPickerState();
@@ -130,7 +131,7 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
       _pickedX = x;
       _pickedY = y;
       if (found != null) {
-        _value.text = found.value;
+        _value.text = found.value + (widget.allowPercent && found.isPercent ? '%' : '');
         _status = 'OCR: ${found.raw}. Проверь значение перед поиском.';
       } else {
         _status = 'Число здесь не распознано. Введи показанное в игре '
@@ -141,11 +142,14 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
 
   void _confirm() {
     final value = _value.text.trim();
-    if (!RegExp(r'^[+-]?\d{1,12}(?:[.,]\d{1,6})?$').hasMatch(value)) {
+    final numeric = widget.allowPercent && value.endsWith('%')
+        ? value.substring(0, value.length - 1).trim() : value;
+    if (!RegExp(r'^[+-]?\d{1,12}(?:[.,]\d{1,6})?$').hasMatch(numeric)) {
       _setError('Введи одно числовое значение, например 100 или 12.5');
       return;
     }
-    Navigator.of(context).pop(value.replaceAll(',', '.'));
+    Navigator.of(context).pop(numeric.replaceAll(',', '.') +
+        (widget.allowPercent && value.endsWith('%') ? '%' : ''));
   }
 
   @override
@@ -230,6 +234,9 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
               onSubmitted: (_) => _confirm(),
             ),
             const SizedBox(height: 8),
+            if (widget.allowPercent) const Text('Если число показано в процентах, '
+                'добавь знак %. Поиск RAM проверит несколько представлений.',
+                style: TextStyle(fontSize: 11)) else
             const Text('Пока это выбор числа по снимку, а не чтение памяти '
               'игры. Значение будет использовано для поиска в доступных '
               'файлах. Изменение сейва отдельно подтверждается и '
