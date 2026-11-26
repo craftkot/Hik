@@ -450,7 +450,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     if (!_percentScanning) return;
     _percentSearchCancelled = true;
     _service.cancel();
-    setState(() => _status = 'Поиск процентов остановлен.');
+    setState(() => _status = 'Поиск остановлен.');
   }
 
   void _selectPercentGroup(LivePercentScanGroup group) {
@@ -672,7 +672,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                 icon: const Icon(Icons.list_alt),
                 label: const Text('Параметры на экране')),
               if (_busy) TextButton.icon(
-                onPressed: _service.cancel,
+                onPressed: _percentScanning ? _cancelPercentSearch : _service.cancel,
                 icon: const Icon(Icons.stop_circle_outlined),
                 label: const Text('Прервать')),
             ]),
