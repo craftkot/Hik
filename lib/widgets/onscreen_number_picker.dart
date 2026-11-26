@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../core/screen_number_ocr.dart';
+import '../core/screen_menu_values.dart';
 import '../core/windows_screen_capture.dart';
 
 /// First stage of point-and-edit:
@@ -13,7 +14,15 @@ import '../core/windows_screen_capture.dart';
 /// search for the numeric value in accessible game files.
 /// This dialog cannot attach to or modify another process.
 class OnScreenNumberPicker extends StatefulWidget {
-  const OnScreenNumberPicker({super.key});
+  const OnScreenNumberPicker({super.key, this.allowPercent = false,
+    this.gamePid, this.gameStartTicks, this.menuMode = false,
+    this.captureOverride, this.recognizeOverride});
+  final bool allowPercent;
+  final int? gamePid;
+  final int? gameStartTicks;
+  final bool menuMode;
+  final Future<Uint8List> Function()? captureOverride;
+  final Future<String?> Function(Uint8List)? recognizeOverride;
 
   @override
   State<OnScreenNumberPicker> createState() => _OnScreenNumberPickerState();
@@ -27,6 +36,9 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
   double? _pickedX;
   double? _pickedY;
   List<ScreenNumberToken> _tokens = const [];
+  List<ScreenMenuValue> _menuValues = const [];
+  bool _showMenuList = true;
+  int? _selectedRow;
   bool _loading = false;
   String _status = 'Сделай снимок или выбери изображение экрана игры.';
 
@@ -56,13 +68,27 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
   }
 
   Future<void> _takeScreenshot() async {
-    if (!Platform.isWindows || _loading) return;
+    if ((!Platform.isWindows && widget.captureOverride == null) || _loading) return;
     setState(() {
       _loading = true;
-      _status = 'Переключись в игру — снимок рабочего стола через 4 секунды';
+      _status = widget.menuMode
+          ? 'Переключись в выбранную игру — снимок через 4 секунды'
+          : 'Переключись в игру — снимок рабочего стола через 4 секунды';
+      if (widget.menuMode) {
+        _image = null;
+        _menuValues = const [];
+        _tokens = const [];
+        _selectedRow = null;
+        _value.clear();
+      }
     });
     try {
-      final bytes = await WindowsScreenCapture.captureAfter();
+      final bytes = widget.captureOverride != null
+          ? await widget.captureOverride!()
+          : widget.menuMode
+          ? await WindowsScreenCapture.captureGameAfter(
+              pid: widget.gamePid!, processStartTicks: widget.gameStartTicks!)
+          : await WindowsScreenCapture.captureAfter();
       await _loadImage(bytes);
     } catch (error) {
       _setError('Захват экрана не удался: $error');
@@ -79,6 +105,9 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
       _loading = true;
       _status = 'Читаю изображение и пробую локальное распознавание цифр…';
       _tokens = const [];
+      _menuValues = const [];
+      _selectedRow = null;
+      _value.clear();
     });
     try {
       final codec = await ui.instantiateImageCodec(bytes);
@@ -98,10 +127,19 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
         _pickedX = null;
         _pickedY = null;
       });
-      final tsv = await LocalScreenOcr.recognizeTsv(bytes);
+      final tsv = widget.recognizeOverride != null
+          ? await widget.recognizeOverride!(bytes)
+          : await LocalScreenOcr.recognizeTsv(bytes);
       if (!mounted) return;
       setState(() {
         _tokens = tsv == null ? const [] : ScreenNumberOcr.parseTsv(tsv);
+        _menuValues = tsv == null ? const [] : ScreenMenuValues.parseTsv(tsv);
+        if (widget.menuMode) {
+          _showMenuList = _menuValues.isNotEmpty;
+          _status = tsv == null ? 'OCR недоступен. Введи число вручную.'
+              : 'Параметров на снимке: ${_menuValues.length}. Выбери строку.';
+          return;
+        }
         _status = tsv == null
           ? 'Локальный OCR не найден. Нажми на число и введи его вручную.'
           : 'Распознано чисел: ${_tokens.length}. Нажми на число на снимке.';
@@ -130,7 +168,7 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
       _pickedX = x;
       _pickedY = y;
       if (found != null) {
-        _value.text = found.value;
+        _value.text = found.value + (widget.allowPercent && found.isPercent ? '%' : '');
         _status = 'OCR: ${found.raw}. Проверь значение перед поиском.';
       } else {
         _status = 'Число здесь не распознано. Введи показанное в игре '
@@ -141,36 +179,44 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
 
   void _confirm() {
     final value = _value.text.trim();
-    if (!RegExp(r'^[+-]?\d{1,12}(?:[.,]\d{1,6})?$').hasMatch(value)) {
+    final numeric = widget.allowPercent && value.endsWith('%')
+        ? value.substring(0, value.length - 1).trim() : value;
+    if (!RegExp(r'^[+-]?\d{1,12}(?:[.,]\d{1,6})?$').hasMatch(numeric)) {
       _setError('Введи одно числовое значение, например 100 или 12.5');
       return;
     }
-    Navigator.of(context).pop(value.replaceAll(',', '.'));
+    Navigator.of(context).pop(numeric.replaceAll(',', '.') +
+        (widget.allowPercent && value.endsWith('%') ? '%' : ''));
   }
 
   @override
   Widget build(BuildContext context) {
     final bytes = _image;
     return AlertDialog(
-      title: const Text('Выбрать число на экране игры'),
+      title: Text(widget.menuMode ? 'Параметры открытого меню игры'
+          : 'Выбрать число на экране игры'),
       content: SizedBox(
         width: 750,
         height: MediaQuery.sizeOf(context).height * 0.66,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (widget.menuMode) const Text('Открой нужное меню в выбранной игре. '
+                'Нажми «Снять окно игры» и переключись в неё за 4 секунды. '
+                'Снимок обновляется вручную, числа — подсказки для поиска RAM.',
+                style: TextStyle(fontSize: 12)) else
             const Text('Windows: нажми «Снимок через 4 сек.» и переключись '
               'в одиночную игру. Android: выбери готовый скриншот. '
               'Потом нажми на цифру и проверь её значение.',
               style: TextStyle(fontSize: 12)),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              if (Platform.isWindows)
+              if (Platform.isWindows || widget.captureOverride != null)
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _takeScreenshot,
                   icon: const Icon(Icons.screenshot_monitor),
-                  label: const Text('Снимок через 4 сек.'),
+                  label: Text(widget.menuMode ? 'Снять окно игры' : 'Снимок через 4 сек.'),
                 ),
-              OutlinedButton.icon(
+              if (!widget.menuMode) OutlinedButton.icon(
                 onPressed: _loading ? null : _openScreenshot,
                 icon: const Icon(Icons.add_photo_alternate_outlined),
                 label: const Text('Открыть скриншот'),
@@ -180,7 +226,32 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
             if (_loading) const LinearProgressIndicator(),
             Text(_status, style: const TextStyle(fontSize: 11)),
             const SizedBox(height: 10),
-            Expanded(child: ClipRRect(
+            if (widget.menuMode && bytes != null)
+              Align(alignment: Alignment.centerLeft, child: TextButton.icon(
+                onPressed: _loading ? null : () => setState(() => _showMenuList = !_showMenuList),
+                icon: Icon(_showMenuList ? Icons.image_outlined : Icons.list_alt),
+                label: Text(_showMenuList ? 'Показать снимок' : 'Показать список'))),
+            if (widget.menuMode && _showMenuList && bytes != null)
+              Expanded(child: _menuValues.isEmpty
+                ? const Center(child: Text('Числа не распознаны. Открой снимок или введи число.'))
+                : ListView.builder(itemCount: _menuValues.length,
+                    itemBuilder: (_, i) {
+                      final entry = _menuValues[i];
+                      return ListTile(
+                        selected: _selectedRow == i,
+                        enabled: !_loading,
+                        title: Text(entry.label, maxLines: 2, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(entry.role.isEmpty ? entry.line : entry.role),
+                        trailing: Text(entry.input,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                        onTap: () => setState(() {
+                          _selectedRow = i;
+                          _value.text = entry.input;
+                          _status = 'Выбрано: ${entry.label}. Проверь число перед поиском.';
+                        }),
+                      );
+                    }))
+            else Expanded(child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Container(color: Colors.black26,
                 child: bytes == null
@@ -230,6 +301,9 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
               onSubmitted: (_) => _confirm(),
             ),
             const SizedBox(height: 8),
+            if (widget.allowPercent) const Text('Если число показано в процентах, '
+                'добавь знак %. Поиск RAM проверит несколько представлений.',
+                style: TextStyle(fontSize: 11)) else
             const Text('Пока это выбор числа по снимку, а не чтение памяти '
               'игры. Значение будет использовано для поиска в доступных '
               'файлах. Изменение сейва отдельно подтверждается и '
@@ -244,7 +318,7 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
         FilledButton.icon(
           onPressed: _loading ? null : _confirm,
           icon: const Icon(Icons.manage_search),
-          label: const Text('Найти значение'),
+          label: Text(widget.menuMode ? 'Найти в памяти' : 'Найти значение'),
         ),
       ],
     );

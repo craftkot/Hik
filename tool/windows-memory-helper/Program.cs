@@ -472,6 +472,40 @@ internal static class Program
             if (MatchesComparison("i32", "7331",
                     Encode("i32", "7331"), "changed", out _))
                 throw new InvalidOperationException("Changed comparison returned false positive");
+            // Exercise the same coefficient representations as the UI,
+            // with a real guarded write and restore to owned test memory.
+            foreach (var sample in new[] {
+                (Format: "f32", Before: "0.8", After: "0.95"),
+                (Format: "f64", Before: "2", After: "2.5"),
+                (Format: "i32", Before: "8000", After: "9500")
+            })
+            {
+                var oldBytes = Encode(sample.Format, sample.Before);
+                var newBytes = Encode(sample.Format, sample.After);
+                Marshal.Copy(oldBytes, 0, address, oldBytes.Length);
+                var percentageHits = new List<string>();
+                var percentageProbe = new byte[24];
+                oldBytes.AsSpan().CopyTo(percentageProbe.AsSpan(8));
+                AddMatches(percentageProbe, oldBytes, 0x10000,
+                    oldBytes.Length, 24, 24, percentageHits, 5000);
+                if (!percentageHits.Contains("0x10008"))
+                    throw new InvalidOperationException("Percentage encoding not found");
+                string target = "0x" + address.ToInt64().ToString("X");
+                WriteInternal(new Request {
+                    Pid = Environment.ProcessId, Address = target,
+                    Format = sample.Format, Expected = sample.Before,
+                    Replacement = sample.After
+                }, allowSelf: true);
+                if (!ReadSelf(address, newBytes.Length).AsSpan().SequenceEqual(newBytes))
+                    throw new InvalidOperationException("Percentage write failed");
+                WriteInternal(new Request {
+                    Pid = Environment.ProcessId, Address = target,
+                    Format = sample.Format, Expected = sample.After,
+                    Replacement = sample.Before
+                }, allowSelf: true);
+                if (!ReadSelf(address, oldBytes.Length).AsSpan().SequenceEqual(oldBytes))
+                    throw new InvalidOperationException("Percentage restore failed");
+            }
             var identityHandle = OpenProcess(QueryReadWrite, false, (uint)Environment.ProcessId);
             if (identityHandle == IntPtr.Zero)
                 throw new InvalidOperationException("Cannot open self for process identity test");

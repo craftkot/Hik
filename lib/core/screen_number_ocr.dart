@@ -13,6 +13,7 @@ class ScreenNumberToken {
 
   final String value;
   final String raw;
+  bool get isPercent => raw.trim().endsWith('%');
   final int left;
   final int top;
   final int width;
@@ -47,7 +48,7 @@ class ScreenNumberOcr {
     final tokens = <ScreenNumberToken>[];
     final pattern = RegExp(
       r'^([+-]?\d{1,12}(?:[.,]\d{1,6})?)'
-      r'(?:\s*/\s*\d{1,12}(?:[.,]\d{1,6})?)?$',
+      r'(?:\s*%|\s*/\s*\d{1,12}(?:[.,]\d{1,6})?)?$',
     );
     for (final line in lines.skip(1)) {
       if (tokens.length >= 10000) break;

@@ -115,13 +115,22 @@ internal sealed class OverlayForm : Form
         body.Controls.Add(processRow, 0, 2);
 
         var inputRow = Row();
-        _value.Width = 205; _value.PlaceholderText = "HP / мана / деньги";
+        _value.Width = 205; _value.PlaceholderText = "HP / мана / проценты";
         _value.BackColor = Panel; _value.ForeColor = Color.White;
         _type.Width = 129; _type.BackColor = Panel; _type.ForeColor = Color.White;
         _type.Items.AddRange(new object[] {
             new FormatItem("i32", "Int32"), new FormatItem("i64", "Int64"),
-            new FormatItem("f32", "Float32"), new FormatItem("f64", "Float64")
+            new FormatItem("f32", "Float32"), new FormatItem("f64", "Float64"),
+            new FormatItem("f32", "Float32 · % / 100", 100),
+            new FormatItem("f64", "Float64 · % / 100", 100),
+            new FormatItem("i32", "Int32 · % × 100", 0.01m),
+            new FormatItem("i64", "Int64 · % × 100", 0.01m),
+            new FormatItem("i32", "Int32 · %", 1),
+            new FormatItem("i64", "Int64 · %", 1),
+            new FormatItem("f32", "Float32 · %", 1),
+            new FormatItem("f64", "Float64 · %", 1)
         });
+        _type.DropDownWidth = 210;
         _type.SelectedIndex = 0;
         _type.SelectedIndexChanged += (_, _) => ClearSearch();
         inputRow.Controls.Add(_value); inputRow.Controls.Add(_type);
@@ -242,6 +251,36 @@ internal sealed class OverlayForm : Form
             ProcessStartTicks(pid) == start;
     }
     private string Format => (_type.SelectedItem as FormatItem)?.Code ?? "i32";
+    private decimal? PercentDivisor => (_type.SelectedItem as FormatItem)?.PercentDivisor;
+
+    private bool TryInput(string text, out string raw)
+    {
+        raw = text.Trim().Replace(',', '.');
+        if (PercentDivisor is decimal divisor)
+        {
+            if (raw.EndsWith('%')) raw = raw[..^1].Trim();
+            if (!decimal.TryParse(raw,
+                NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                CultureInfo.InvariantCulture, out var percent)) return false;
+            try {
+                raw = (percent / divisor).ToString(
+                    "0.############################", CultureInfo.InvariantCulture);
+            }
+            catch (OverflowException) { return false; }
+        }
+        return ValidNumber(raw, Format);
+    }
+
+    private string DisplayInput(string raw)
+    {
+        if (PercentDivisor is not decimal divisor ||
+            !double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            return raw;
+        var percent = value * (double)divisor;
+        return double.IsFinite(percent)
+            ? percent.ToString("0.##########", CultureInfo.InvariantCulture) + "%"
+            : raw;
+    }
 
     private void ClearSearch()
     {
@@ -260,7 +299,7 @@ internal sealed class OverlayForm : Form
             _addresses.Items.Clear();
             for (int i = 0; i < _hits.Count; i++) {
                 string value = i < _baselines.Count ? _baselines[i] : "?";
-                _addresses.Items.Add(_hits[i] + "  |  " + value);
+                _addresses.Items.Add(_hits[i] + "  |  " + DisplayInput(value));
             }
         }
         finally { _addresses.EndUpdate(); }
@@ -383,8 +422,7 @@ internal sealed class OverlayForm : Form
     {
         if (_busy) return;
         if (Pid is not int pid) { _status.Text = "Выбери игру"; return; }
-        var value = _value.Text.Trim().Replace(',', '.');
-        if (!ValidNumber(value, Format)) { _status.Text = "Введи допустимое число"; return; }
+        if (!TryInput(_value.Text, out var value)) { _status.Text = "Введи допустимое число"; return; }
         if (refine && _hits.Count == 0) return;
         var previous = _hits.ToArray();
         SetBusy(true, refine ? "Уточняю совпадения…" : "Сканирую разрешённую память…");
@@ -456,8 +494,7 @@ internal sealed class OverlayForm : Form
             _addresses.SelectedIndex >= _hits.Count)
             return;
         string address = _hits[_addresses.SelectedIndex];
-        var replacement = _replacement.Text.Trim().Replace(',', '.');
-        if (!ValidNumber(replacement, Format)) {
+        if (!TryInput(_replacement.Text, out var replacement)) {
             _status.Text = "Неверный формат нового значения"; return;
         }
         if (!IsSameProcess(pid)) {
@@ -469,7 +506,7 @@ internal sealed class OverlayForm : Form
         string expected = _baselines[_addresses.SelectedIndex];
         if (MessageBox.Show(this,
             $"Изменить ТОЛЬКО адрес {address} процесса PID {pid}?\n" +
-            $"{expected} → {replacement}\n\n" +
+            $"{DisplayInput(expected)} → {DisplayInput(replacement)} (RAM: {expected} → {replacement})\n\n" +
             "Подтверждаешь, что это твоя одиночная игра? Ошибочная запись может вызвать вылет.",
             "EHTID · подтверждение RAM-записи", MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
@@ -487,7 +524,7 @@ internal sealed class OverlayForm : Form
                 expected, replacement });
             _undo = new UndoRecord(pid, format, address, expected, replacement);
             _expected = replacement;
-            _value.Text = replacement;
+            _value.Text = DisplayInput(replacement);
             _hits = new List<string> { address };
             _baselines = new List<string> { replacement };
             ShowCandidates();
@@ -515,7 +552,7 @@ internal sealed class OverlayForm : Form
                 format = restore.Format, address = restore.Address,
                 expected = restore.After, replacement = restore.Before
             });
-            _expected = restore.Before; _value.Text = restore.Before;
+            _expected = restore.Before; _value.Text = DisplayInput(restore.Before);
             _baselines = new List<string> { restore.Before };
             ShowCandidates();
             _addresses.SelectedIndex = _hits.Count == 1 ? 0 : -1;
@@ -538,7 +575,7 @@ internal sealed class OverlayForm : Form
         public override string ToString() => $"{Name} · {WindowTitle} (PID {Pid})";
     }
 
-    private sealed record FormatItem(string Code, string Label)
+    private sealed record FormatItem(string Code, string Label, decimal? PercentDivisor = null)
     {
         public override string ToString() => Label;
     }

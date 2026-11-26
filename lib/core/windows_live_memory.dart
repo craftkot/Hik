@@ -17,6 +17,73 @@ enum LiveValueFormat {
   final int width;
 }
 
+/// Different common storage representations of an on-screen percentage.
+/// A percentage of 80 may be stored as 80, 0.8, or 8000 basis points.
+enum LivePercentEncoding {
+  int32Points(LiveValueFormat.int32, 0, 'Int32 · проценты'),
+  float32Ratio(LiveValueFormat.float32, -2, 'Float32 · коэффициент'),
+  float64Ratio(LiveValueFormat.float64, -2, 'Float64 · коэффициент'),
+  float32Points(LiveValueFormat.float32, 0, 'Float32 · проценты'),
+  float64Points(LiveValueFormat.float64, 0, 'Float64 · проценты'),
+  int64Points(LiveValueFormat.int64, 0, 'Int64 · проценты'),
+  int32Basis(LiveValueFormat.int32, 2, 'Int32 · базисные пункты'),
+  int64Basis(LiveValueFormat.int64, 2, 'Int64 · базисные пункты');
+
+  const LivePercentEncoding(this.format, this.decimalShift, this.label);
+  final LiveValueFormat format;
+  final int decimalShift;
+  final String label;
+
+  static String normalize(String input) {
+    var value = input.trim().replaceAll(',', '.');
+    if (value.endsWith('%')) value = value.substring(0, value.length - 1).trim();
+    if (!RegExp(r'^[+-]?\d{1,12}(?:\.\d{1,6})?$').hasMatch(value)) {
+      throw const FormatException('Введите процент, например 80% или 12,5%');
+    }
+    return value;
+  }
+
+  /// Decimal shift with no intermediate binary floating-point rounding.
+  String encode(String input) {
+    var value = normalize(input);
+    final negative = value.startsWith('-');
+    if (negative || value.startsWith('+')) value = value.substring(1);
+    final parts = value.split('.');
+    final fraction = parts.length == 2 ? parts[1] : '';
+    final digits = parts[0] + fraction;
+    final point = parts[0].length + decimalShift;
+    final padded = point <= 0
+        ? '0.' + ''.padLeft(-point, '0') + digits
+        : point >= digits.length
+            ? digits.padRight(point, '0')
+            : digits.substring(0, point) + '.' + digits.substring(point);
+    final halves = padded.split('.');
+    final whole = BigInt.parse(halves[0]).toString();
+    final tail = halves.length == 2
+        ? halves[1].replaceFirst(RegExp(r'0+$'), '') : '';
+    final raw = (negative ? '-' : '') + whole +
+        (tail.isEmpty ? '' : '.' + tail);
+    WindowsLiveMemoryService.validateValue(raw, format);
+    return raw;
+  }
+
+  String display(String raw) {
+    final value = double.tryParse(raw);
+    if (value == null || !value.isFinite) return raw;
+    final scaled = decimalShift == -2 ? value * 100
+        : decimalShift == 2 ? value / 100 : value;
+    if (!scaled.isFinite) return raw;
+    return double.parse(scaled.toStringAsPrecision(12)).toString() + '%';
+  }
+}
+
+class LivePercentScanGroup {
+  const LivePercentScanGroup(this.encoding, this.raw, this.scan);
+  final LivePercentEncoding encoding;
+  final String raw;
+  final LiveMemoryScan scan;
+}
+
 enum LiveChangeMode {
   snapshot('all', 'Обновить показания'),
   changed('changed', 'Изменилось'),
@@ -241,6 +308,39 @@ class WindowsLiveMemoryService {
       'alignment': bytewise ? 1 : format.width,
     });
     return LiveMemoryScan.fromJson(response);
+  }
+
+  /// Try each representable percentage encoding separately, retaining the
+  /// format with each result. Read-only; no candidate is written implicitly.
+  Future<List<LivePercentScanGroup>> scanPercent({
+    required int pid,
+    required String percent,
+    int budgetMiB = 512,
+    bool bytewise = false,
+    void Function(LivePercentEncoding encoding)? onProgress,
+    bool Function()? shouldContinue,
+    bool plainNumber = false,
+  }) async {
+    LivePercentEncoding.normalize(percent);
+    final groups = <LivePercentScanGroup>[];
+    final encodings = plainNumber ? const [
+      LivePercentEncoding.int32Points, LivePercentEncoding.float32Points,
+      LivePercentEncoding.int64Points, LivePercentEncoding.float64Points,
+    ] : LivePercentEncoding.values;
+    for (final encoding in encodings) {
+      if (shouldContinue?.call() == false) break;
+      String raw;
+      try {
+        raw = encoding.encode(percent);
+      } on FormatException {
+        continue; // Fractional percentage not representable in integer format.
+      }
+      onProgress?.call(encoding);
+      final result = await scan(pid: pid, format: encoding.format,
+          value: raw, budgetMiB: budgetMiB, bytewise: bytewise);
+      groups.add(LivePercentScanGroup(encoding, raw, result));
+    }
+    return List.unmodifiable(groups);
   }
 
   Future<LiveMemoryScan> refine({
