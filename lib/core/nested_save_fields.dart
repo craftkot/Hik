@@ -46,7 +46,7 @@ class NestedSaveFields {
     var nodes = 0;
     var budget = limit * 2;
     void walk(Object? value, String path, List<String> containers,
-        String label, int depth, {bool paired = false}) {
+        String label, int depth, {bool paired = false, bool namedPair = false}) {
       if (++nodes > 100000 || depth > 40 || results.length >= 10000) return;
       if (value is String && containers.length < 6 &&
           value.length <= budget && value.length <= limit) {
@@ -74,12 +74,26 @@ class NestedSaveFields {
             if (_skip(key)) continue;
             final short = key.split(',').first;
             walk(values[i], '$path/values/$i', containers,
-                short, depth + 1, paired: isVariableMap);
+                short, depth + 1, paired: isVariableMap, namedPair: true);
           }
           return;
         }
         // A malformed parallel array map must not be interpreted by index.
         if (keys is List && values is List) return;
+        // Some serializers use records with a name/key and a value.
+        // Never treat arbitrary nested object metadata as a game parameter.
+        final key = value['key'] ?? value['name'];
+        final scalar = value['value'];
+        final variableRecord = label.toLowerCase().contains('variable');
+        if (key is String && key.isNotEmpty && !_skip(key) &&
+            (value['key'] == null || value['name'] == null ||
+                value['key'] == value['name']) &&
+            (_numeric(scalar) != null || (scalar is String && _flag(scalar))) &&
+            (variableRecord ||
+                SaveValuePriority.fromPath(key, _numeric(scalar)).important)) {
+          walk(scalar, '$path/value', containers, key, depth + 1,
+              paired: variableRecord, namedPair: true);
+        }
         for (final entry in value.entries) {
           if (_skip(entry.key)) continue;
           walk(entry.value, path + '/' + _segment(entry.key), containers,
@@ -88,14 +102,14 @@ class NestedSaveFields {
       } else if (value is List) {
         for (var i = 0; i < value.length && nodes < 100000; i++) {
           walk(value[i], '$path/$i', containers, label, depth + 1,
-              paired: paired);
+              paired: paired, namedPair: namedPair);
         }
       } else {
         final numeric = _numeric(value);
         final category = SaveValuePriority.fromPath(label, numeric);
         final eligible = (numeric != null && (category.important || paired)) ||
             (paired && value is String && _flag(value));
-        if (eligible && (containers.isNotEmpty || value is String || paired)) {
+        if (eligible && (containers.isNotEmpty || value is String || paired || namedPair)) {
           results.add(NestedSaveField(List.unmodifiable(containers), path,
               label, value!, category));
         }
