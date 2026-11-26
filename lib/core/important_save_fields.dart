@@ -3,9 +3,10 @@ import 'dart:typed_data';
 
 import 'ini_save_editor.dart';
 import 'json_editor.dart';
+import 'nested_save_fields.dart';
 import 'save_value_priority.dart';
 
-enum ImportantFieldSource { json, ini, embeddedText }
+enum ImportantFieldSource { json, ini, embeddedText, nestedJson }
 
 class ImportantSaveField {
   const ImportantSaveField({
@@ -16,6 +17,7 @@ class ImportantSaveField {
     this.json,
     this.ini,
     this.embedded,
+    this.nested,
   });
 
   final String name;
@@ -25,6 +27,7 @@ class ImportantSaveField {
   final JsonField? json;
   final IniSaveField? ini;
   final EmbeddedNumberField? embedded;
+  final NestedSaveField? nested;
 }
 
 class EmbeddedNumberField {
@@ -56,12 +59,28 @@ class ImportantSaveInspector {
         final important = prioritizeJsonFields(fields, max: 10000)
             .where((field) => field.category.important)
             .take(maxFields);
-        return List.unmodifiable(important.map((field) =>
-            ImportantSaveField(
-              name: field.pointer, value: field.preview,
-              category: field.category, source: ImportantFieldSource.json,
-              json: field,
-            )));
+        final nested = NestedSaveFields.inspect(text);
+        final pairedPaths = nested.where((f) => f.containers.isEmpty)
+            .map((f) => f.pointer).toSet();
+        final combined = <ImportantSaveField>[
+          ...important.where((field) => !pairedPaths.contains(field.pointer))
+              .map((field) => ImportantSaveField(
+            name: field.pointer, value: field.preview,
+            category: field.category, source: ImportantFieldSource.json,
+            json: field,
+          )),
+          ...nested.map((field) => ImportantSaveField(
+            name: field.name, value: field.value.toString(),
+            category: field.category, source: ImportantFieldSource.nestedJson,
+            nested: field,
+          )),
+        ];
+        final indexed = combined.asMap().entries.toList();
+        indexed.sort((a,b) {
+          final order = a.value.category.priority.compareTo(b.value.category.priority);
+          return order == 0 ? a.key.compareTo(b.key) : order;
+        });
+        return List.unmodifiable(indexed.take(maxFields).map((e) => e.value));
       } catch (_) {
         return const [];
       }

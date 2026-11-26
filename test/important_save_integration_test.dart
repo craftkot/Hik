@@ -147,4 +147,47 @@ void main() {
       expect(after[i], before[i], reason: 'Unexpected byte change at $i');
     }
   });
+
+  testWidgets('nested variable row saves through the normal GZIP backup flow',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 1050);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final storage = _GzipGameStorage();
+    final source = jsonEncode({
+      'objectJsonMap': {
+        'keys': ['Example.VariableManager'],
+        'values': ['{"LocalVariableMap":{"keys":["gold","switch"],'
+            '"values":["120","False"]}}'],
+      },
+      'rollbackStackJson': '{"gold":555}',
+    });
+    storage.bytes = GzipSaveCodec.encode(Uint8List.fromList(utf8.encode(source)));
+    await tester.pumpWidget(MaterialApp(home: GameLabHome(storage: storage)));
+    await tester.tap(find.text('Редактор сохранений'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Открыть папку игры'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SaveData015.gz').last);
+    await tester.pumpAndSettle();
+    expect(find.text('gold'), findsOneWidget);
+    expect(find.text('switch'), findsOneWidget);
+    expect(find.text('555'), findsNothing);
+    await tester.tap(find.text('gold'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '999');
+    await tester.tap(find.text('Изменить'));
+    await tester.pumpAndSettle();
+    expect(find.text('999'), findsOneWidget);
+    expect(storage.writes, 0);
+    await tester.tap(find.text('Применить'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Создать копию и применить'));
+    await tester.pumpAndSettle();
+    expect(storage.writes, 1);
+    expect(storage.verifiedExpected, isTrue);
+    expect(utf8.decode(GzipSaveCodec.decode(storage.bytes)),
+        source.replaceFirst('120', '999'));
+  });
 }

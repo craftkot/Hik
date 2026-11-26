@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 
 import 'core/android_app_save_discovery.dart';
@@ -16,6 +17,7 @@ import 'core/game_profile.dart';
 import 'core/json_editor.dart';
 import 'core/ini_save_editor.dart';
 import 'core/important_save_fields.dart';
+import 'core/nested_save_fields.dart';
 import 'core/lossless_json_number_editor.dart';
 import 'core/storage_service.dart';
 import 'core/save_value_priority.dart';
@@ -130,6 +132,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
   Uint8List? _bytes;
   // The original on-disk bytes stay in _bytes for expected-byte backup writes.
   Uint8List? _gzipPayload;
+  Uint8List? _wrappedSaveImage;
   String? _gzipError;
   List<ImportantSaveField> _importantEntries = const [];
   bool _showRawSave = false;
@@ -723,6 +726,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     setState(() {
       _loading = true;
       _state = 'Чтение ${file.name}…';
+      _wrappedSaveImage = null;
       // Invalidate previously opened bytes before the next read. A failure
       // must not leave stale data or a stale write action in the editor.
       _selected = null;
@@ -754,6 +758,8 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       final decoded = file.isImage || isLarge || inspector != null ||
           gzipError != null
           ? null : decodeEditableText(unpacked ?? bytes);
+      final wrappedImage = decoded == null ? null :
+          NestedSaveFields.wrappedImage(decoded);
       if (!mounted) return false;
       setState(() {
         _selected = file;
@@ -763,9 +769,10 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         _archive = inspector;
         _archiveEntry = null;
         _archiveEntryBytes = null;
-        _originalText = decoded;
-        _editor.text = decoded ?? '';
-        _importantEntries = decoded != null
+        _wrappedSaveImage = wrappedImage;
+        _originalText = wrappedImage == null ? decoded : null;
+        _editor.text = _originalText ?? '';
+        _importantEntries = wrappedImage != null ? const [] : decoded != null
             ? ImportantSaveInspector.inspectText(decoded)
             : gzipError == null && !isLarge && inspector == null && !file.isImage
                 ? ImportantSaveInspector.inspectBinary(unpacked ?? bytes)
@@ -933,8 +940,79 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _exportWrappedSaveImage() async {
+    final bytes = _wrappedSaveImage;
+    if (bytes == null || !Platform.isWindows) return;
+    final extension = bytes.first == 137 ? 'png' : 'jpg';
+    try {
+      final destination = await FilePicker.platform.saveFile(
+        dialogTitle: 'Извлечь изображение',
+        fileName: 'save-preview.' + extension,
+        type: FileType.custom,
+        allowedExtensions: [extension],
+      );
+      if (destination == null) return;
+      final output = File(destination);
+      // Never replace a save or an existing image.
+      await output.create(exclusive: true);
+      await output.writeAsBytes(bytes, flush: true);
+      _message('Изображение извлечено');
+    } catch (error) {
+      _message('Не удалось извлечь изображение: $error');
+    }
+  }
+
+  Future<bool> _editNestedSaveField(NestedSaveField field) async {
+    final source = _editor.text;
+    final opened = _selected?.id;
+    var typed = field.value.toString();
+    final updated = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Изменить поле'),
+        content: Column(mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SelectableText(field.name),
+            const SizedBox(height: 12),
+            TextFormField(
+              initialValue: typed,
+              autofocus: true,
+              onChanged: (value) => typed = value,
+              decoration: const InputDecoration(labelText: 'Новое значение'),
+            ),
+            const SizedBox(height: 8),
+            const Text('Вложенная структура и тип значения сохраняются.',
+              style: TextStyle(fontSize: 11, color: _muted)),
+          ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, typed),
+            child: const Text('Изменить')),
+        ],
+      ),
+    );
+    if (updated == null || !mounted) return false;
+    try {
+      if (_selected?.id != opened || _editor.text != source) {
+        throw StateError('Открытый файл изменился');
+      }
+      final next = NestedSaveFields.change(source, field, updated);
+      if (next == source) return false;
+      setState(() {
+        _editor.text = next;
+        _importantEntries = ImportantSaveInspector.inspectText(next);
+      });
+      return true;
+    } catch (error) {
+      _message('Поле не изменено: $error');
+      return false;
+    }
+  }
+
   Future<bool> _editImportantSaveField(ImportantSaveField entry) async {
     if (_loading) return false;
+    if (entry.nested != null) return _editNestedSaveField(entry.nested!);
     if (entry.json != null) return _editImportantJsonNumber(entry.json!);
     if (entry.ini != null) return _editIniNumber(entry.ini!);
     final field = entry.embedded;
@@ -1701,11 +1779,13 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
       decoration: BoxDecoration(color: _panel, borderRadius: BorderRadius.circular(17)),
       child: _emptyMessage(Icons.description_outlined,
           'Выбери файл', 'Два раза нажимать не обязательно — одного касания хватит.'));
-    final imagePreview = _archive == null && file.isImage && file.size <= maxEditableBytes;
+    final imagePreview = _archive == null &&
+        (file.isImage || _wrappedSaveImage != null) &&
+        file.size <= maxEditableBytes;
     final displayBytes = _gzipPayload ?? bytes;
     final canEdit = _originalText != null && !file.isImage;
     final canBinaryEdit = _section == Workspace.saves && !canEdit &&
-        _gzipError == null && _archive == null &&
+        _wrappedSaveImage == null && _gzipError == null && _archive == null &&
         !file.isImage && file.size <= maxEditableBytes;
     final canUseIniEditor = Platform.isWindows &&
         _section == Workspace.saves && canEdit && _archive == null &&
@@ -1713,7 +1793,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
         (file.isSave || file.isStructuredIniSaveCandidate ||
             _windowsFoundSaveFileIds.contains(file.id));
     final showImportantSave = _section == Workspace.saves &&
-        !_showRawSave && _archive == null && _gzipError == null &&
+        _wrappedSaveImage == null && !_showRawSave && _archive == null && _gzipError == null &&
         !file.isImage && file.size <= maxEditableBytes;
     final canUseJsonEditor = canEdit &&
         (_section == Workspace.saves || _section == Workspace.localize) &&
@@ -1741,6 +1821,11 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
                 tooltip: 'Просмотреть и восстановить резервную копию',
                 onPressed: _loading || _dirty ? null : _restoreOpenedSave,
                 icon: const Icon(Icons.restore, color: _cyanAccent)),
+            if (_wrappedSaveImage != null && Platform.isWindows)
+              IconButton(
+                tooltip: 'Извлечь изображение в отдельный файл',
+                onPressed: _loading ? null : _exportWrappedSaveImage,
+                icon: const Icon(Icons.download_outlined, color: _accent)),
             if (canUseIniEditor) IconButton(
               tooltip: 'Редактировать числовые поля INI',
               onPressed: _loading ? null : _showIniFields,
@@ -1793,7 +1878,7 @@ class _GameLabHomeState extends State<GameLabHome> with WidgetsBindingObserver {
             : imagePreview
             ? Center(child: InteractiveViewer(
                 minScale: 0.5, maxScale: 5,
-                child: Image.memory(bytes, fit: BoxFit.contain,
+                child: Image.memory(_wrappedSaveImage ?? bytes, fit: BoxFit.contain,
                   errorBuilder: (context, error, stackTrace) => const Text('Не удалось декодировать картинку'))))
             : canEdit
                 ? Padding(padding: const EdgeInsets.all(12),
