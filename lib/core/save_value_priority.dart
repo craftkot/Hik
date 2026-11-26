@@ -38,7 +38,7 @@ class SaveValuePriority {
     'dexterity', 'dex', 'agility', 'agi', 'intelligence', 'int',
     'vitality', 'vit', 'wisdom', 'wis', 'luck', 'charisma', 'defense',
     'defence', 'attack', 'atk', 'armor', 'armour', 'crit',
-    'criticals', 'damage', 'dmg', 'resistance',
+    'criticals', 'damage', 'dmg', 'resistance', 'con', 'skl', 'def', 'skill',
     'сила', 'ловкость', 'интеллект', 'удача', 'атака', 'защита',
     'броня', 'статы', 'характеристики',
   };
@@ -49,7 +49,7 @@ class SaveValuePriority {
     'xp', 'exp', 'experience', 'опыт',
   };
   static const _resources = <String>{
-    'stamina', 'energy', 'endurance', 'hunger', 'thirst', 'силавыносливость', 'выносливость', 'энергия',
+    'stamina', 'energy', 'endurance', 'hunger', 'thirst', 'ap', 'day', 'силавыносливость', 'выносливость', 'энергия',
     'голод', 'жажда',
   };
 
