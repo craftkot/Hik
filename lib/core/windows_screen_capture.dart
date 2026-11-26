@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -172,11 +173,19 @@ class LocalScreenOcr {
     );
     try {
       await temp.writeAsBytes(png, flush: true);
-      final result = await Process.run('tesseract',
-        [temp.path, 'stdout', 'tsv'],
-      ).timeout(const Duration(seconds: 20));
-      if (result.exitCode != 0) return null;
-      return result.stdout.toString();
+      // Prefer the local Windows OCR engine; Russian/English availability
+      // depends on the installed Windows recognition language packs.
+      final builtIn = await _windowsOcr(temp.path);
+      if (builtIn != null) return builtIn;
+      for (final args in [
+        [temp.path, 'stdout', '-l', 'rus+eng', '--psm', '11', 'tsv'],
+        [temp.path, 'stdout', '--psm', '11', 'tsv'],
+      ]) {
+        final result = await Process.run('tesseract', args)
+            .timeout(const Duration(seconds: 20));
+        if (result.exitCode == 0) return result.stdout.toString();
+      }
+      return null;
     } on ProcessException {
       return null;
     } on TimeoutException {
@@ -187,6 +196,79 @@ class LocalScreenOcr {
       } on FileSystemException {
         // OCR failure does not block manual entry.
       }
+    }
+  }
+
+  static Future<String?> _windowsOcr(String path) async {
+    final safePath = path.replaceAll("'", "''");
+    final script = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+[Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime] | Out-Null
+[Windows.Storage.Streams.IRandomAccessStreamWithContentType,Windows.Storage.Streams,ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.SoftwareBitmap,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
+[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime] | Out-Null
+[Windows.Media.Ocr.OcrResult,Windows.Foundation,ContentType=WindowsRuntime] | Out-Null
+[Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime] | Out-Null
+$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+  $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and
+  $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1 -and
+  $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation' + [char]96 + '1'
+} | Select-Object -First 1
+if ($null -eq $asTask) { throw 'WinRT async bridge unavailable' }
+function Await($operation,[Type]$type) {
+  $task = $asTask.MakeGenericMethod($type).Invoke($null,@($operation))
+  if (-not $task.Wait(15000)) { throw 'OCR operation timed out' }
+  $task.Result
+}
+$file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync('__PATH__')) ([Windows.Storage.StorageFile])
+$stream = Await ($file.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+$bitmap = $null
+try {
+  $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+  if ($decoder.PixelWidth -gt [Windows.Media.Ocr.OcrEngine]::MaxImageDimension -or
+      $decoder.PixelHeight -gt [Windows.Media.Ocr.OcrEngine]::MaxImageDimension) {
+    throw 'Window exceeds Windows OCR dimensions'
+  }
+  $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+  $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  if ($null -eq $engine) { throw 'No installed OCR language' }
+  $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+  Write-Output "level	page_num	block_num	par_num	line_num	word_num	left	top	width	height	conf	text"
+  $lineNo = 0
+  foreach ($line in $result.Lines) {
+    $lineNo++
+    $wordNo = 0
+    foreach ($word in $line.Words) {
+      $wordNo++
+      $r = $word.BoundingRect
+      $left = [int][Math]::Floor($r.X); $top = [int][Math]::Floor($r.Y)
+      $width = [int][Math]::Ceiling($r.Width); $height = [int][Math]::Ceiling($r.Height)
+      $text = $word.Text -replace '[\t\r\n]', ' '
+      # WinRT does not expose a confidence score; 50 is a neutral marker,
+      # not a measured probability or verified memory value.
+      Write-Output (@(5,1,1,1,$lineNo,$wordNo,$left,$top,$width,$height,50,$text) -join [char]9)
+    }
+  }
+} finally {
+  if ($null -ne $bitmap) { $bitmap.Dispose() }
+  $stream.Dispose()
+}
+'''.replaceAll('__PATH__', safePath);
+    try {
+      final result = await Process.run('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+        '-Command', script,
+      ], stdoutEncoding: const Utf8Codec(allowMalformed: true))
+          .timeout(const Duration(seconds: 45));
+      if (result.exitCode != 0) return null;
+      final output = result.stdout.toString();
+      return output.contains('word_num') && output.trim().split('\n').length > 1
+          ? output : null;
+    } catch (_) {
+      return null;
     }
   }
 }
