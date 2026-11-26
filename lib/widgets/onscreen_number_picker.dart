@@ -15,11 +15,14 @@ import '../core/windows_screen_capture.dart';
 /// This dialog cannot attach to or modify another process.
 class OnScreenNumberPicker extends StatefulWidget {
   const OnScreenNumberPicker({super.key, this.allowPercent = false,
-    this.gamePid, this.gameStartTicks, this.menuMode = false});
+    this.gamePid, this.gameStartTicks, this.menuMode = false,
+    this.captureOverride, this.recognizeOverride});
   final bool allowPercent;
   final int? gamePid;
   final int? gameStartTicks;
   final bool menuMode;
+  final Future<Uint8List> Function()? captureOverride;
+  final Future<String?> Function(Uint8List)? recognizeOverride;
 
   @override
   State<OnScreenNumberPicker> createState() => _OnScreenNumberPickerState();
@@ -65,13 +68,24 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
   }
 
   Future<void> _takeScreenshot() async {
-    if (!Platform.isWindows || _loading) return;
+    if ((!Platform.isWindows && widget.captureOverride == null) || _loading) return;
     setState(() {
       _loading = true;
-      _status = 'Переключись в игру — снимок рабочего стола через 4 секунды';
+      _status = widget.menuMode
+          ? 'Переключись в выбранную игру — снимок через 4 секунды'
+          : 'Переключись в игру — снимок рабочего стола через 4 секунды';
+      if (widget.menuMode) {
+        _image = null;
+        _menuValues = const [];
+        _tokens = const [];
+        _selectedRow = null;
+        _value.clear();
+      }
     });
     try {
-      final bytes = widget.menuMode
+      final bytes = widget.captureOverride != null
+          ? await widget.captureOverride!()
+          : widget.menuMode
           ? await WindowsScreenCapture.captureGameAfter(
               pid: widget.gamePid!, processStartTicks: widget.gameStartTicks!)
           : await WindowsScreenCapture.captureAfter();
@@ -113,7 +127,9 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
         _pickedX = null;
         _pickedY = null;
       });
-      final tsv = await LocalScreenOcr.recognizeTsv(bytes);
+      final tsv = widget.recognizeOverride != null
+          ? await widget.recognizeOverride!(bytes)
+          : await LocalScreenOcr.recognizeTsv(bytes);
       if (!mounted) return;
       setState(() {
         _tokens = tsv == null ? const [] : ScreenNumberOcr.parseTsv(tsv);
@@ -194,7 +210,7 @@ class _OnScreenNumberPickerState extends State<OnScreenNumberPicker> {
               style: TextStyle(fontSize: 12)),
             const SizedBox(height: 12),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              if (Platform.isWindows)
+              if (Platform.isWindows || widget.captureOverride != null)
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _takeScreenshot,
                   icon: const Icon(Icons.screenshot_monitor),
