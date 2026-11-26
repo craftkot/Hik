@@ -259,6 +259,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       _notice('Обнови список окон: не определён запуск процесса.');
       return;
     }
+    setState(_clearWatch);
     final number = await showDialog<String>(context: context,
         builder: (_) => OnScreenNumberPicker(allowPercent: true, menuMode: true,
             gamePid: game.pid, gameStartTicks: game.processStartTicks));
@@ -350,6 +351,10 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       _status = 'Начинаю поиск представлений ' + _groupKind + '…';
     });
     try {
+      if (!(await _service.processes()).any(game.isSameInstanceAs)) {
+        throw StateError('Игровой процесс завершился или сменился');
+      }
+      if (!mounted || _percentSearchCancelled) return;
       final groups = await _service.scanPercent(
         pid: game.pid, percent: input, plainNumber: plain,
         budgetMiB: _budgetMiB, bytewise: _bytewiseScan,
