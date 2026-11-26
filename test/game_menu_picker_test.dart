@@ -11,7 +11,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     String? selected;
     final bytes = base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0yQAAAAASUVORK5CYII=');
+      'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGUlEQVR4nGP8//8/AymAiSTVoxpGNQwpDQBVbQMdPVIhQwAAAABJRU5ErkJggg==');
     await tester.pumpWidget(MaterialApp(home: Scaffold(
       body: Builder(builder: (context) => TextButton(
         child: const Text('Open'),
