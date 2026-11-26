@@ -59,13 +59,17 @@ class ImportantSaveInspector {
         final important = prioritizeJsonFields(fields, max: 10000)
             .where((field) => field.category.important)
             .take(maxFields);
+        final nested = NestedSaveFields.inspect(text);
+        final pairedPaths = nested.where((f) => f.containers.isEmpty)
+            .map((f) => f.pointer).toSet();
         final combined = <ImportantSaveField>[
-          ...important.map((field) => ImportantSaveField(
+          ...important.where((field) => !pairedPaths.contains(field.pointer))
+              .map((field) => ImportantSaveField(
             name: field.pointer, value: field.preview,
             category: field.category, source: ImportantFieldSource.json,
             json: field,
           )),
-          ...NestedSaveFields.inspect(text).map((field) => ImportantSaveField(
+          ...nested.map((field) => ImportantSaveField(
             name: field.name, value: field.value.toString(),
             category: field.category, source: ImportantFieldSource.nestedJson,
             nested: field,
