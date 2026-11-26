@@ -319,10 +319,15 @@ class WindowsLiveMemoryService {
     bool bytewise = false,
     void Function(LivePercentEncoding encoding)? onProgress,
     bool Function()? shouldContinue,
+    bool plainNumber = false,
   }) async {
     LivePercentEncoding.normalize(percent);
     final groups = <LivePercentScanGroup>[];
-    for (final encoding in LivePercentEncoding.values) {
+    final encodings = plainNumber ? const [
+      LivePercentEncoding.int32Points, LivePercentEncoding.float32Points,
+      LivePercentEncoding.int64Points, LivePercentEncoding.float64Points,
+    ] : LivePercentEncoding.values;
+    for (final encoding in encodings) {
       if (shouldContinue?.call() == false) break;
       String raw;
       try {
