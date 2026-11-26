@@ -23,6 +23,10 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
   List<LiveGameProcess> _processes = const [];
   LiveGameProcess? _selected;
   LiveValueFormat _format = LiveValueFormat.int32;
+  LivePercentEncoding? _percentEncoding;
+  List<LivePercentScanGroup> _percentGroups = const [];
+  bool _percentSearchCancelled = false;
+  String _displayNumber(String raw) => _percentEncoding?.display(raw) ?? raw;
   LiveMemoryScan? _result;
   _LastPatch? _lastPatch;
   /// Independent last-observed number for each candidate address.
@@ -44,6 +48,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
   @override
   void dispose() {
     _watchTimer?.cancel();
+    _percentSearchCancelled = true;
     _service.cancel();
     _value.dispose();
     _replacement.dispose();
@@ -193,6 +198,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       if (!mounted) return;
       setState(() {
         _processes = found;
+        _percentGroups = const [];
+        _percentEncoding = null;
         _selected = found.where((p) => _selected != null &&
             p.isSameInstanceAs(_selected!)).firstOrNull;
         _result = null; _lastPatch = null;
@@ -226,10 +233,13 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
 
   Future<void> _getFromScreenshot() async {
     final number = await showDialog<String>(context: context,
-        builder: (_) => const OnScreenNumberPicker());
+        builder: (_) => const OnScreenNumberPicker(allowPercent: true));
     if (!mounted || number == null) return;
     setState(() {
       _value.text = number;
+      _percentGroups = const [];
+      _percentEncoding = null;
+      _clearWatch();
       _result = null; _lastPatch = null;
         _snapshots = const {};
       _status = 'OCR: ${number}. Теперь выбери игру и запусти поиск. '
@@ -241,9 +251,15 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
     if (_busy) return;
     final game = _selected;
     if (game == null) { _notice('Сначала выбери процесс игры'); return; }
-    final number = _value.text.trim();
-    try { WindowsLiveMemoryService.validateValue(number, _format); }
-    catch (error) { _notice(error); return; }
+    if (!refine && _percentEncoding == null && _value.text.trim().endsWith('%')) {
+      await _searchPercent();
+      return;
+    }
+    String number;
+    try {
+      number = _percentEncoding?.encode(_value.text) ?? _value.text.trim();
+      WindowsLiveMemoryService.validateValue(number, _format);
+    } catch (error) { _notice(error); return; }
     if (refine && (_result == null || _result!.addresses.isEmpty)) {
       _notice('Для уточнения сначала нужен первичный поиск');
       return;
@@ -262,6 +278,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       if (!mounted || game.pid != _selected?.pid) return;
       setState(() {
         _result = result; _lastPatch = null;
+        _percentGroups = const [];
         _snapshots = {for (final address in result.addresses) address: number};
         _status = result.addresses.isEmpty
             ? 'Совпадений нет. Попробуй другой формат или '
@@ -273,6 +290,79 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       });
     } catch (error) { _notice(error); }
     finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _searchPercent() async {
+    final game = _selected;
+    if (_busy || game == null) return;
+    String input;
+    try {
+      input = LivePercentEncoding.normalize(_value.text);
+    } catch (error) {
+      _notice(error);
+      return;
+    }
+    if (game.processStartTicks == null || game.processStartTicks! <= 0) {
+      _notice('Обнови список окон: не определён запуск процесса.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _percentSearchCancelled = false;
+      _percentGroups = const [];
+      _percentEncoding = null;
+      _result = null;
+      _lastPatch = null;
+      _snapshots = const {};
+      _clearWatch();
+      _value.text = input + '%';
+      _status = 'Начинаю поиск представлений процента…';
+    });
+    try {
+      final groups = await _service.scanPercent(
+        pid: game.pid, percent: input,
+        budgetMiB: _budgetMiB, bytewise: _bytewiseScan,
+        shouldContinue: () => mounted && !_percentSearchCancelled,
+        onProgress: (encoding) {
+          if (mounted) setState(() => _status =
+              'Поиск процента: ' + encoding.label);
+        },
+      );
+      if (!mounted || _percentSearchCancelled ||
+          !game.isSameInstanceAs(_selected ?? game)) return;
+      final processes = await _service.processes();
+      if (!mounted || _percentSearchCancelled) return;
+      if (!processes.any(game.isSameInstanceAs)) {
+        throw StateError('Игровой процесс завершился или сменился');
+      }
+      setState(() {
+        _percentGroups = groups;
+        _status = groups.every((g) => g.scan.addresses.isEmpty)
+            ? 'Нет точных совпадений. Значение может быть вычисляемым '
+              'или округлённым. Попробуй другое число/лимит RAM.'
+            : 'Выбери представление, измени процент в игре и уточни. '
+              'Найденные адреса ещё не подтверждены.';
+      });
+    } catch (error) {
+      if (!_percentSearchCancelled) _notice(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _selectPercentGroup(LivePercentScanGroup group) {
+    if (_busy || group.scan.addresses.isEmpty) return;
+    setState(() {
+      _format = group.encoding.format;
+      _percentEncoding = group.encoding;
+      _result = group.scan;
+      _snapshots = {for (final address in group.scan.addresses)
+        address: group.raw};
+      _lastPatch = null;
+      _clearWatch();
+      _status = 'Выбрано: ' + group.encoding.label +
+          '. Измени процент в игре и уточни; запись только вручную.';
+    });
   }
 
   Future<void> _compare({LiveChangeMode? mode}) async {
@@ -303,6 +393,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       if (!mounted || _selected?.pid != game.pid) return;
       setState(() {
         _result = result;
+        _percentGroups = const [];
         _snapshots = {
           for (var i = 0; i < result.addresses.length; i++)
             result.addresses[i]: result.values[i],
@@ -334,7 +425,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
       });
     }
     _replacement.clear();
-    final newValue = await showDialog<String>(context: context,
+    final entered = await showDialog<String>(context: context,
       builder: (context) {
         var accepted = false;
         return StatefulBuilder(builder: (context, update) => AlertDialog(
@@ -348,12 +439,14 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               SelectableText('${address} · ${_format.label}',
                 style: const TextStyle(fontFamily: 'monospace')),
               const SizedBox(height: 8),
-              Text('Сейчас ожидаем: ${expected}'),
+              Text('Сейчас ожидаем: ' + _displayNumber(expected) +
+                  (_percentEncoding == null ? '' : ' (RAM: $expected)')),
               const SizedBox(height: 14),
               TextField(controller: _replacement, autofocus: true,
                 keyboardType: const TextInputType.numberWithOptions(
                   signed: true, decimal: true),
-                decoration: const InputDecoration(labelText: 'Новое значение')),
+                decoration: InputDecoration(labelText: _percentEncoding == null
+                    ? 'Новое значение' : 'Новый процент (например 95%)')),
               const SizedBox(height: 8),
               CheckboxListTile(contentPadding: EdgeInsets.zero,
                 title: const Text('Это моя одиночная игра. '
@@ -375,9 +468,12 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
           ],
         ));
       });
-    if (!mounted || newValue == null) return;
-    try { WindowsLiveMemoryService.validateValue(newValue, _format); }
-    catch (error) { _notice(error); return; }
+    if (!mounted || entered == null) return;
+    String newValue;
+    try {
+      newValue = _percentEncoding?.encode(entered) ?? entered.trim();
+      WindowsLiveMemoryService.validateValue(newValue, _format);
+    } catch (error) { _notice(error); return; }
     if (expected == newValue) { _notice('Число не изменилось'); return; }
     setState(() { _busy = true; _status = 'Проверяю адрес, записываю и перечитываю…'; });
     try {
@@ -389,7 +485,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
         _lastPatch = _LastPatch(game.pid, game.processStartTicks, address, _format, expected, newValue);
         _result = LiveMemoryScan(addresses: [address],
             scannedBytes: 0, truncated: false, regions: 0);
-        _value.text = newValue;
+        _value.text = _displayNumber(newValue);
+        _percentGroups = const [];
         _snapshots = {address: newValue};
         if (_watched.contains(address)) _watchValues[address] = newValue;
         _status = 'Готово: ${expected} → ${newValue} по ${address}. '
@@ -410,7 +507,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
           replacement: item.oldValue);
       if (!mounted) return;
       setState(() {
-        _lastPatch = null; _value.text = item.oldValue;
+        _lastPatch = null; _value.text = _displayNumber(item.oldValue);
         _snapshots = {item.address: item.oldValue};
         if (_watched.contains(item.address)) {
           _watchValues[item.address] = item.oldValue;
@@ -482,6 +579,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                   maxLines: 1, overflow: TextOverflow.ellipsis))).toList(),
               onChanged: _busy ? null : (pid) => setState(() {
                 _selected = _processes.where((p) => p.pid == pid).firstOrNull;
+                _percentEncoding = null;
+                _percentGroups = const [];
                 _result = null; _lastPatch = null;
         _snapshots = const {};
         _clearWatch();
@@ -495,12 +594,15 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                 labelText: 'Текущее число из игры, например 120')),
             const SizedBox(height: 10),
             DropdownButtonFormField<LiveValueFormat>(
+              key: ValueKey(_format),
               initialValue: _format, isExpanded: true,
               decoration: const InputDecoration(labelText: 'Формат числа в памяти'),
               items: LiveValueFormat.values.map((fmt) => DropdownMenuItem(
                 value: fmt, child: Text(fmt.label))).toList(),
               onChanged: _busy ? null : (fmt) => setState(() {
                 if (fmt != null) _format = fmt;
+                _percentEncoding = null;
+                _percentGroups = const [];
                 _result = null; _lastPatch = null;
         _snapshots = const {};
         _clearWatch();
@@ -534,6 +636,7 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
               value: _bytewiseScan,
               onChanged: _busy ? null : (enabled) => setState(() {
                 _bytewiseScan = enabled;
+                _percentGroups = const [];
                 if (enabled && _budgetMiB > 512) _budgetMiB = 512;
                 _result = null;
                 _snapshots = const {};
@@ -551,6 +654,12 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                 onPressed: _busy || _selected == null ? null : () => _search(false),
                 icon: const Icon(Icons.manage_search),
                 label: const Text('Первый поиск')),
+              OutlinedButton.icon(
+                key: const Key('percent-ram-scan'),
+                onPressed: _busy || _selected == null ? null : _searchPercent,
+                icon: const Icon(Icons.percent),
+                label: const Text('Поиск процентов'),
+              ),
               FilledButton.tonalIcon(
                 onPressed: _busy || hits.isEmpty ? null : () => _search(true),
                 icon: const Icon(Icons.filter_alt_outlined),
@@ -588,6 +697,25 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                   label: const Text('Сравнить с прошлым значением')),
               ],
             ),
+            if (_percentEncoding != null)
+              Text('Процентный режим: ' + _percentEncoding!.label,
+                style: const TextStyle(fontSize: 12, color: _cyan)),
+            if (_percentGroups.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text('Варианты хранения процента · лимит RAM на каждый',
+                style: TextStyle(fontSize: 11, color: _muted)),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                for (final group in _percentGroups)
+                  ChoiceChip(
+                    selected: _percentEncoding == group.encoding,
+                    label: Text(group.encoding.label + ': ' +
+                        group.scan.addresses.length.toString() +
+                        (group.scan.truncated ? '+' : '')),
+                    onSelected: _busy || group.scan.addresses.isEmpty
+                        ? null : (_) => _selectPercentGroup(group),
+                  ),
+              ]),
+            ],
             if (_busy) const Padding(padding: EdgeInsets.only(top: 10),
                 child: LinearProgressIndicator()),
             const SizedBox(height: 12),
@@ -632,7 +760,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                           Expanded(child: Text(address,
                             style: const TextStyle(
                               fontFamily: 'monospace', fontSize: 11))),
-                          Text(_watchValues[address] ?? 'Недоступен',
+                          Text(_watchValues[address] == null ? 'Недоступен' :
+                            _displayNumber(_watchValues[address]!),
                             style: const TextStyle(
                               color: _cyan, fontWeight: FontWeight.w700)),
                           IconButton(
@@ -665,7 +794,8 @@ class _LiveMemoryPanelState extends State<LiveMemoryPanel> {
                           color: _purple, size: 19),
                         title: Text(hits[i],
                           style: const TextStyle(fontFamily: 'monospace')),
-                        subtitle: Text(_snapshots[hits[i]] ?? ''),
+                        subtitle: Text(_snapshots[hits[i]] == null ? '' :
+                          _displayNumber(_snapshots[hits[i]]!)),
                         trailing: IconButton(
                           tooltip: _watched.contains(hits[i])
                               ? 'Убрать из наблюдения'
