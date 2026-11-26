@@ -108,7 +108,7 @@ class _ImportantSavePanelState extends State<ImportantSavePanel> {
                 Text(widget.isBinary
                     ? 'Содержимое бинарное. Без формата игры нельзя '
                       'надёжно определить, где HP, деньги и другие параметры.'
-                    : 'Показаны только числовые поля с понятными названиями. '
+                    : 'Показаны распознанные параметры и игровые переменные. '
                       'Остальные данные не удаляются.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 12, color: muted)),
@@ -128,11 +128,12 @@ class _ImportantSavePanelState extends State<ImportantSavePanel> {
                 final field = entries[index];
                 return Material(color: Colors.transparent, child: ListTile(
                   enabled: !_busy,
-                  leading: const Icon(Icons.star_rounded, color: accent, size: 18),
+                  leading: Icon(field.category.important ? Icons.star_rounded : Icons.data_object,
+                      color: field.category.important ? accent : muted, size: 18),
                   title: Text(field.name, maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text(field.category.label,
+                  subtitle: Text(field.category.important ? field.category.label : 'Переменная',
                       style: const TextStyle(fontSize: 11, color: muted)),
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     ConstrainedBox(
