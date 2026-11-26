@@ -10,6 +10,63 @@ class LosslessJsonNumberEditor {
     r'^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$',
   );
 
+  /// Replace an existing JSON string while retaining the original escapes
+  /// outside the changed decoded substring.
+  static String replaceString(String source, {
+    required String pointer,
+    required String expected,
+    required String replacement,
+  }) {
+    if (source.length > 8 * 1024 * 1024) {
+      throw const FormatException('JSON превышает лимит 8 МиБ');
+    }
+    jsonDecode(source);
+    final span = _JsonNumberSpanFinder(source, pointer).find();
+    final raw = source.substring(span.start, span.end);
+    if (jsonDecode(raw) != expected) {
+      throw StateError('Исходная строка изменилась');
+    }
+    if (expected == replacement) return source;
+    var prefix = 0;
+    while (prefix < expected.length && prefix < replacement.length &&
+        expected.codeUnitAt(prefix) == replacement.codeUnitAt(prefix)) {
+      prefix++;
+    }
+    var suffix = 0;
+    while (suffix < expected.length - prefix &&
+        suffix < replacement.length - prefix &&
+        expected.codeUnitAt(expected.length - 1 - suffix) ==
+            replacement.codeUnitAt(replacement.length - 1 - suffix)) {
+      suffix++;
+    }
+    // Each JSON escape encodes exactly one UTF-16 code unit. Literal
+    // surrogate pairs occupy two units, as in the decoded Dart string.
+    int rawOffset(int decodedOffset) {
+      var cursor = 1;
+      for (var n = 0; n < decodedOffset; n++) {
+        if (cursor >= raw.length - 1) throw StateError('Invalid string span');
+        if (raw.codeUnitAt(cursor) == 92) {
+          cursor += raw[cursor + 1] == 'u' ? 6 : 2;
+        } else {
+          cursor++;
+        }
+      }
+      return cursor;
+    }
+    final encoded = jsonEncode(replacement.substring(
+        prefix, replacement.length - suffix));
+    final result = source.replaceRange(
+        span.start + rawOffset(prefix),
+        span.start + rawOffset(expected.length - suffix),
+        encoded.substring(1, encoded.length - 1));
+    jsonDecode(result);
+    final check = _JsonNumberSpanFinder(result, pointer).find();
+    if (jsonDecode(result.substring(check.start, check.end)) != replacement) {
+      throw StateError('Проверка вложенной строки не прошла');
+    }
+    return result;
+  }
+
   static String change(String source, {
     required String pointer,
     required num expected,
@@ -113,6 +170,16 @@ class _JsonNumberSpanFinder {
   }
 
   void _value(String path, int depth) {
+    _whitespace();
+    final start = i;
+    _valueBody(path, depth);
+    if (path == target) {
+      span = _NumberSpan(start, i);
+      count++;
+    }
+  }
+
+  void _valueBody(String path, int depth) {
     if (depth > 64 || ++visited > 1000000) {
       throw const FormatException('Слишком сложный JSON');
     }
@@ -122,8 +189,10 @@ class _JsonNumberSpanFinder {
     if (char == '{') {
       i++;
       if (_consume('}')) return;
+      final keys = <String>{};
       do {
         final key = _string();
+        if (!keys.add(key)) throw StateError('Повторяющийся ключ JSON');
         _expect(':');
         final encodedKey = key.replaceAll('~', '~0').replaceAll('/', '~1');
         _value('$path/$encodedKey', depth + 1);
@@ -145,10 +214,7 @@ class _JsonNumberSpanFinder {
       final match = _number.matchAsPrefix(source, at);
       if (match != null) {
         i = match.end;
-        if (path == target) {
-          span = _NumberSpan(at, i);
-          count++;
-        }
+
       } else {
         var found = false;
         for (final literal in ['true', 'false', 'null']) {
