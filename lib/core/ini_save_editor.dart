@@ -146,9 +146,12 @@ class IniSaveEditor {
     }
     final valueStart = start + field.valueStart;
     final valueEnd = start + field.valueEnd;
-    final current = inspect(source)
+    final current = inspect(source, max: 10000)
         .where((candidate) =>
             candidate.lineIndex == field.lineIndex &&
+            candidate.lineStart == field.lineStart &&
+            candidate.originalLine == field.originalLine &&
+            candidate.valueEnd == field.valueEnd &&
             candidate.key == field.key &&
             candidate.section == field.section &&
             candidate.valueStart == field.valueStart &&
