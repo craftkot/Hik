@@ -69,6 +69,34 @@ void main() {
     }
   });
 
+  test('rejects stale fields when the original line is extended', () {
+    const original = 'hp=10\n';
+    final field = IniSaveEditor.inspect(original).single;
+    const changed = 'hp=10x\nhp=10\n';
+    expect(() => IniSaveEditor.changeNumber(changed, field, '99'),
+        throwsStateError);
+    const shifted = '  hp=10\n';
+    expect(() => IniSaveEditor.changeNumber(shifted, field, '99'),
+        throwsStateError);
+  });
+
+  test('rejects a forged value end that would overwrite a comment', () {
+    const source = 'hp=10 ; keep\n';
+    final field = IniSaveEditor.inspect(source).single;
+    final forged = IniSaveField(
+      lineIndex: field.lineIndex,
+      lineStart: field.lineStart,
+      originalLine: field.originalLine,
+      section: field.section,
+      key: field.key,
+      value: field.value,
+      valueStart: field.valueStart,
+      valueEnd: field.originalLine.length,
+    );
+    expect(() => IniSaveEditor.changeNumber(source, forged, '99'),
+        throwsStateError);
+  });
+
   test('fractional fields accept finite decimals, not inserted syntax', () {
     final mana = IniSaveEditor.inspect(save)
         .singleWhere((f) => f.key == 'mana');
